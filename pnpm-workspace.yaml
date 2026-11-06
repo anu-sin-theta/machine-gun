@@ -1,0 +1,6 @@
+allowBuilds:
+  sharp: false
+  unrs-resolver: false
+saveExact: true
+fetchTimeout: 600000
+fetchRetries: 5
