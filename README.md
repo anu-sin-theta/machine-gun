@@ -1,48 +1,95 @@
 # Kavach402
 
-**A payment agent that checks a payment request before paying it.** Kavach402 reads the bill, link or screenshot privately on **0G Private Computer**, buys evidence from specialist checkers over **Hedera x402**, and if the risk is high it asks for **World ID Agent Pass** approval, with stronger proof required as the risk rises.
+**A payment agent that checks a payment request before it pays.**
 
-Built for ETHGlobal Mumbai 2026. Target tracks: Hedera "AI Agents That Pay: x402 on Hedera", World "Agent Pass", and 0G "Build with 0G Private Computer".
+Give it a bill, a message or a link. It reads the request privately on **0G Private Computer**, buys evidence from specialist checkers over **Hedera x402**, decides with a spending policy, and when the risk is high it asks a human for a **World ID Agent Pass** approval, with a stronger proof required the riskier the payment looks.
 
-> **Status:** piece 2 of 10. The safety-critical core (risk policy, approval binding, canonical hashing, link intelligence) is written in **Rust**, compiled to WebAssembly and called from the Next.js app. No sponsor integrations yet. See [HANDOFF.md](HANDOFF.md) for exact status and [HOW_IT_WORKS.md](HOW_IT_WORKS.md) for the design.
+Built for ETHGlobal Mumbai 2026. Tracks: Hedera "AI Agents That Pay: x402 on Hedera", World "Agent Pass", 0G "Build with 0G Private Computer". Per-track write-up: [docs/TRACKS.md](docs/TRACKS.md).
+
+## Try it in one minute, no keys
+
+```bash
+pnpm install
+AGENT_MODE=demo WORLD_MODE=simulated pnpm dev
+```
+
+Open http://localhost:3000 and click an example. Five requests cover every path: an ordinary bill (paid on its own), a phishing scam (held for the strongest World ID), a request that names the wrong account, rent over the agent's limit (needs approval) and tuition over the hard cap (blocked). The 3-minute walkthrough is in [docs/DEMO.md](docs/DEMO.md).
+
+In this mode three things are **labelled stand-ins**, and the page says so: the 0G model (a keyword heuristic), merchant settlement (an invented transaction id) and World ID (a consent page where you choose the result). Everything else is the real code.
+
+## What is real and what is verified
+
+| | Status |
+|---|---|
+| Spending policy, approval binding, canonical hashing, link analysis | **Verified.** Rust compiled to WebAssembly; 80 Rust tests incl. property tests; a TypeScript copy is checked against it on random inputs (parity suite) |
+| Agent loop (probe, read, buy evidence, judge, decide, step up, pay, audit) | **Verified with fakes.** Scenario tests incl. concurrency and replay |
+| World ID flow (PKCE, state, nonce, `acr`, fresh `auth_time`, single use) | **Verified** end to end against a built-in OIDC issuer using the same code path as the real one; World's real discovery document is accepted (live test) |
+| Postgres adapter and migration | **Verified** against a real Postgres engine (PGlite). Not yet run on Neon itself |
+| x402 server | **Partly verified live.** A real request returned a correct HBAR payment challenge, with the fee payer from the Blocky402 testnet facilitator. **No payment has been settled** |
+| Browser behaviour | **Verified.** 13 Playwright tests on the production build |
+| 0G calls, Hedera writes (HCS), x402 settlement, a real World login, Neon, Vercel | **Not yet verified live.** Written and unit-tested; they need credentials. The live tests exist and skip with a reason until you add them (`pnpm test:live`) |
+
+Counts at the time of writing: 394 JavaScript tests (26 files), 80 Rust tests, 13 browser tests.
+
+## How it decides
+
+```text
+ request + merchant URL
+   1. merchant's own 402 challenge  -> who gets paid, how much   (the text is never trusted for this)
+   2. 0G (private mode)             -> payee, link, pressure tactics
+   3. checkers paid over x402       -> link analysis, payee reputation   (per-call spend guard)
+   4. 0G                            -> risk verdict; evidence can raise it, never lower it
+   5. Rust policy                   -> auto-pay | step-up(tier) | block
+   6. World ID                      -> approval tied to the exact payment; stronger tier for higher risk
+   7. x402 payment on Hedera        -> every step logged to HCS
+```
+
+Rules that hold everywhere: money moves in exactly one function, reached only from an `auto-pay` decision or a consumed approval (spent once, by a database compare-and-set); a missing risk review counts as high risk; an unreachable checker counts as medium; a request that names a different payee than the merchant's challenge is high risk. Details and the policy table are in [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
+
+## Modes
+
+| Setting | Values | Meaning |
+|---|---|---|
+| `AGENT_MODE` | `live` (default), `demo` | `demo` replaces 0G, settlement and the on-chain logs with labelled local stand-ins |
+| `WORLD_MODE` | `real` (default), `simulated` | `simulated` runs the same OIDC flow against an issuer inside the app. It checks no one: anyone who can reach the app can approve a payment |
+
+Adding real World credentials changes only the client id and secret (a checklist is in [HANDOFF.md](HANDOFF.md)). Never run `simulated` where real money can move.
 
 ## Prerequisites
 
 - Node 22+ and pnpm 11
-- Rust 1.99.1 (installed through [rustup](https://rustup.rs); `rust/rust-toolchain.toml` pins it and adds the `wasm32-unknown-unknown` target)
-- `wasm-bindgen-cli` at **exactly** 0.2.130 (it must match the crate pin):
+- Rust 1.99.1 and `wasm-bindgen-cli` 0.2.130, **only if you change the Rust code**. The compiled WASM is committed in `src/rust/pkg`, so `pnpm install && pnpm dev` works without them:
 
 ```bash
 cargo install wasm-bindgen-cli --version 0.2.130 --locked
 ```
 
-You only need Rust to change the Rust code. The compiled WASM is committed in `src/rust/pkg`, so `pnpm install && pnpm dev` works without it.
-
-## Quick start
+## Going live
 
 ```bash
-pnpm install
-cp .env.example .env
-pnpm test
-pnpm dev
+cp .env.example .env     # fill in the keys you have
+pnpm db:migrate          # needs DATABASE_URL (Neon)
+pnpm setup:hedera        # creates the two HCS topics, prints their ids for .env
+pnpm test:live           # each live test skips with a reason if its credentials are missing
 ```
+
+`GET /api/status` (bearer `API_TOKEN`) lists what is configured and reachable and what is wrong. Deploying to Vercel: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
 | `pnpm dev` / `pnpm build` / `pnpm start` | Next.js dev server, production build, production server |
-| `pnpm lint` | Biome lint + format check (TypeScript) |
-| `pnpm lint:rust` | `cargo fmt --check` + `cargo clippy -D warnings` |
-| `pnpm format` | Biome, writing fixes |
-| `pnpm typecheck` | `next typegen` + `tsc --noEmit` (strict, `noUncheckedIndexedAccess`) |
-| `pnpm test` | Vitest: unit, bridge and **parity** suites (no network) |
-| `pnpm test:coverage` | Same, with coverage thresholds on `src/core` and `src/rust/index.ts` |
-| `pnpm test:rust` | `cargo test --workspace` (unit + property tests) |
-| `pnpm build:wasm` | Rebuild the WASM and regenerate `src/rust/pkg` |
-| `pnpm build:wasm:check` | Fail if the committed `src/rust/pkg` is stale (used in CI) |
-| `pnpm test:live` | Live testnet smoke tests (`LIVE=1`, needs `.env`; added in piece 10) |
-| `pnpm check` | Everything above except the dev server: run before every commit |
+| `pnpm check` | Lint, Rust lint, typecheck, Rust tests, WASM freshness, unit tests with coverage. Run before every commit |
+| `pnpm test` / `pnpm test:coverage` | Vitest: unit, bridge and parity suites (no network) |
+| `pnpm test:rust` | `cargo test --workspace` |
+| `pnpm test:e2e` | Build, then Playwright in demo + simulated mode (`pnpm exec playwright install chromium` once) |
+| `pnpm test:live` | Live smoke tests; need real credentials in `.env` |
+| `pnpm lint` / `pnpm lint:rust` / `pnpm format` / `pnpm typecheck` | Biome, rustfmt + clippy, Biome with fixes, strict `tsc` |
+| `pnpm build:wasm` / `pnpm build:wasm:check` | Rebuild the WASM and regenerate `src/rust/pkg` / fail if it is stale |
+| `pnpm db:migrate` | Apply `drizzle/` migrations to `DATABASE_URL` |
+| `pnpm setup:hedera` | Create the HCS audit and reputation topics |
+| `pnpm gen:sim-key` | Print a `WORLD_SIM_KEY` for multi-instance deployments of the simulator |
 
 After changing anything under `rust/`, run `pnpm build:wasm` and commit the regenerated `src/rust/pkg`.
 
@@ -55,27 +102,37 @@ rust/
 src/
   core/          TypeScript reference implementation of the same logic (the executable spec)
   rust/          Typed bridge to the WASM, plus generated pkg/ (committed)
-  adapters/      (piece 3+) 0G, Hedera/x402, World OIDC, Postgres, each behind a small interface
-  app/           Next.js routes and UI (api/health today)
+  adapters/      db (Postgres/Neon, memory), zerog, hedera (HCS, mirror), x402, world (OIDC, simulator)
+  agent/         The loop (pipeline.ts), x402-backed ports, demo mode
+  ops/           Readiness checklist behind /api/status
+  ui/            Plain-language wording and the view model
+  components/    Result card and request form
+  app/           Next.js page, server action and API routes
+e2e/             Playwright tests (demo + simulated mode)
+frontend/        A separate animated front end (own package.json, port 3001) that was added outside this build. It is excluded from this repo's lint and typecheck and is not covered by the tests or checks described here
 tests/
-  unit/          Pure-function tests, bridge tests, route tests
+  unit/          Pure-function, adapter, route and agent tests
   parity/        Differential tests: TypeScript core vs Rust/WASM on random inputs
-  live/          (piece 10) real testnet calls, only with LIVE=1
-scripts/
-  build-wasm.mjs Reproducible WASM build + generated glue
+  contract/      One repository contract run against memory, PGlite and (live) Neon
+  live/          Real-service tests; skip with a reason without credentials
+drizzle/         SQL migration
+scripts/         WASM build, migrate, HCS topic setup, simulator key
+docs/            DEMO.md, DEPLOY.md, TRACKS.md
 ```
 
 ## Why Rust for the core
 
-Policy, approval binding, hashing and link analysis decide whether money moves, so they get the strictest tooling: no `unwrap`/`expect`/`panic`/unchecked indexing (enforced by clippy), `bigint`-style integer money, and fail-closed defaults. The TypeScript copy in `src/core` is kept as an executable spec: the parity suite feeds both the same random inputs and requires identical results, including identical failures.
+Policy, approval binding, hashing and link analysis decide whether money moves, so they get the strictest tooling: no `unwrap`/`expect`/`panic`/unchecked indexing (enforced by clippy), integer money (`i128` in Rust, `bigint` in TypeScript, decimal strings on the wire) and fail-closed defaults. The TypeScript copy in `src/core` is an executable spec: the parity suite feeds both the same random inputs and requires identical results, including identical failures. It found a real bug in the first TypeScript canonical-JSON implementation (see HANDOFF.md).
 
 ## Tech stack
 
-Next.js 16 (Node runtime), TypeScript strict, Rust 1.99 → WebAssembly (`wasm-bindgen`), pnpm with exact version pins, zod, Vitest + fast-check, proptest, Biome. Coming later: Drizzle + Neon Postgres, `@x402/*` + `@hiero-ledger/sdk`, the `openai` SDK pointed at the 0G router, `openid-client` for World Agent Pass. Deploys to Vercel.
+Next.js 16 and React 19 (Node runtime), TypeScript strict, Rust 1.99 compiled to WebAssembly (`wasm-bindgen`), Drizzle with Neon Postgres, `@x402/*` and `@hiero-ledger/sdk` for Hedera, the `openai` SDK pointed at the 0G router, `openid-client` for World ID, zod, Tailwind 4, Vitest, fast-check, proptest, PGlite, Playwright, Biome. Exact version pins throughout.
 
 ## Docs
 
-- [NEXT_DEVELOPER.md](NEXT_DEVELOPER.md): start here if you are continuing the work: reasoning, research, working style, build plan
-- [docs/PLAN_v2.md](docs/PLAN_v2.md): the product plan (v1 kept as `docs/PLAN_v1_superseded.md`)
-- [HOW_IT_WORKS.md](HOW_IT_WORKS.md): the flow, the policy table, the binding rules, the link-intel signals, the WASM boundary
-- [HANDOFF.md](HANDOFF.md): current state, next steps, open questions, bugs found, change log
+- [docs/DEMO.md](docs/DEMO.md): a 3-minute walkthrough and a live-demo checklist
+- [docs/TRACKS.md](docs/TRACKS.md): what we built for each sponsor track, where it is in the code, and how to check it
+- [docs/DEPLOY.md](docs/DEPLOY.md): Vercel and Neon, environment variables, preflight, limits
+- [HOW_IT_WORKS.md](HOW_IT_WORKS.md): the flow, the policy table, the binding rules, link signals, the WASM boundary
+- [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md): notes for the World team from building against the OIDC issuer
+- [HANDOFF.md](HANDOFF.md): current state, open questions, bugs found, decisions, change log

@@ -62,10 +62,14 @@ A pure function `decide(ctx, config) → Decision`. Rules are checked in order a
 | Tier | Used for | Accepted `acr` values (World OIDC) |
 |---|---|---|
 | `fresh` | low risk but over a limit | any; freshness comes from `max_age=0` |
-| `human` | medium risk | `selfie`, `selfie-face`, `orb`, `orb-face` |
+| `human` | medium risk | `orb`, `orb-face` by default (World advertises no selfie tier; set `WORLD_ACR_HUMAN` to change) |
 | `strong` | high risk (override) | `orb-face` only |
 
 These are sent as the OIDC `claims` parameter: `{"id_token":{"acr":{"essential":true,"values":[...]}}}`. The mapping is configurable, because we haven't yet confirmed which classes World's test environment can issue (see HANDOFF.md).
+
+## Simulated World ID
+
+With `WORLD_MODE=simulated` the app serves its own OIDC issuer under `/api/sim-world` and the normal World flow runs against it. The consent page lets the person at the browser choose `orb-face`, `orb`, `selfie` or deny. It exists so the whole product can be demonstrated before World credentials exist; it verifies no one. Approvals it produces are logged as `source:simulated`. Removing the mode and adding the real client id and secret switches to World with no code changes.
 
 ## Approval binding (`binding.ts` / `binding.rs`)
 

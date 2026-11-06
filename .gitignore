@@ -43,3 +43,8 @@ next-env.d.ts
 
 # rust
 rust/target
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/

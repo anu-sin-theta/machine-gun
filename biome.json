@@ -15,7 +15,10 @@
       "!build",
       "!src/rust/pkg",
       "!rust/target",
-      "!coverage"
+      "!coverage",
+      "!test-results",
+      "!playwright-report",
+      "!frontend"
     ]
   },
   "formatter": {

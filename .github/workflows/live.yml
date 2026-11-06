@@ -1,0 +1,39 @@
+name: Live smoke tests
+
+# Manual only: these talk to real services and (for the deployed-app test) make one
+# real testnet payment. Add the secrets under Settings > Secrets and variables > Actions.
+# A test whose credentials are missing skips itself and says why, so a partial setup is fine.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Deployed app to smoke test (leave empty to skip that test)"
+        required: false
+        default: ""
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      HEDERA_NETWORK: testnet
+      HEDERA_AGENT_ACCOUNT_ID: ${{ secrets.HEDERA_AGENT_ACCOUNT_ID }}
+      HEDERA_AGENT_PRIVATE_KEY: ${{ secrets.HEDERA_AGENT_PRIVATE_KEY }}
+      HEDERA_PAYEE_ACCOUNT_ID: ${{ secrets.HEDERA_PAYEE_ACCOUNT_ID }}
+      HEDERA_HCS_AUDIT_TOPIC_ID: ${{ secrets.HEDERA_HCS_AUDIT_TOPIC_ID }}
+      HEDERA_HCS_REPUTATION_TOPIC_ID: ${{ secrets.HEDERA_HCS_REPUTATION_TOPIC_ID }}
+      ZG_API_KEY: ${{ secrets.ZG_API_KEY }}
+      ZG_MODEL_TEXT: ${{ secrets.ZG_MODEL_TEXT }}
+      WORLD_CLIENT_ID: ${{ secrets.WORLD_CLIENT_ID }}
+      WORLD_CLIENT_SECRET: ${{ secrets.WORLD_CLIENT_SECRET }}
+      API_TOKEN: ${{ secrets.API_TOKEN }}
+      LIVE_BASE_URL: ${{ inputs.base_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:live
