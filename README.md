@@ -75,5 +75,7 @@ Next.js 16 (Node runtime), TypeScript strict, Rust 1.99 → WebAssembly (`wasm-b
 
 ## Docs
 
+- [NEXT_DEVELOPER.md](NEXT_DEVELOPER.md): start here if you are continuing the work: reasoning, research, working style, build plan
+- [docs/PLAN_v2.md](docs/PLAN_v2.md): the product plan (v1 kept as `docs/PLAN_v1_superseded.md`)
 - [HOW_IT_WORKS.md](HOW_IT_WORKS.md): the flow, the policy table, the binding rules, the link-intel signals, the WASM boundary
 - [HANDOFF.md](HANDOFF.md): current state, next steps, open questions, bugs found, change log

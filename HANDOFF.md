@@ -2,6 +2,8 @@
 
 _Read this first when picking up the project. Update it after every change._
 
+> **Starting fresh?** Read [NEXT_DEVELOPER.md](NEXT_DEVELOPER.md) first: it explains the reasoning behind the decisions, the researched API facts, the working style the user expects, and a detailed plan for pieces 3-10.
+
 ## Current state: piece 2 of 10 done
 
 Build plan: 1 scaffold + TS core ✅ · **2 Rust core + WASM bridge ✅** · 3 config + database · 4 0G adapter · 5 Hedera adapter (HCS, mirror node) · 6 x402 checker/merchant endpoints + paying client · 7 World Agent Pass · 8 agent loop · 9 UI + Playwright · 10 live smoke tests, Vercel deploy, submission docs.
