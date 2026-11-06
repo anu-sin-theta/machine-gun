@@ -16,7 +16,11 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:live": "LIVE=1 vitest run tests/live",
-    "check": "pnpm lint && pnpm typecheck && pnpm test:coverage"
+    "check": "pnpm lint && pnpm lint:rust && pnpm typecheck && pnpm test:rust && pnpm build:wasm:check && pnpm test:coverage",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:wasm:check": "node scripts/build-wasm.mjs --check",
+    "lint:rust": "cd rust && cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "test:rust": "cd rust && cargo test --workspace --locked"
   },
   "dependencies": {
     "next": "16.4.5",

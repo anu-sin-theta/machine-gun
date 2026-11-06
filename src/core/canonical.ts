@@ -1,34 +1,56 @@
 import { createHash } from "node:crypto";
 
 /**
- * Deterministic JSON: object keys sorted, bigints as decimal strings,
- * undefined object members dropped. Used for hashing anything we commit to
- * (approval bindings, verdicts, HCS payloads).
+ * Canonical JSON per RFC 8785 (JCS): object keys sorted by UTF-16 code unit,
+ * ES6 number formatting, no whitespace. Extensions: bigints become decimal
+ * strings, Dates become ISO strings, undefined object members are dropped
+ * and undefined array items become null. Used for hashing anything we commit
+ * to (approval bindings, verdicts, HCS payloads); the Rust core produces
+ * byte-identical output.
+ *
+ * The string is built by hand rather than via `JSON.stringify(object)`:
+ * JavaScript enumerates integer-like keys ("0", "10") before all others
+ * regardless of insertion order, which would break the required key order.
  */
 export function canonicalJson(value: unknown): string {
-  return JSON.stringify(normalize(value));
+  if (value === undefined) {
+    throw new TypeError("canonicalJson: undefined is not JSON");
+  }
+  return serialize(value);
 }
 
-function normalize(value: unknown): unknown {
-  if (typeof value === "bigint") return value.toString();
-  if (value === null || typeof value !== "object") {
-    if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new TypeError("canonicalJson: non-finite number");
-    }
-    if (typeof value === "function" || typeof value === "symbol") {
+function serialize(value: unknown): string {
+  switch (typeof value) {
+    case "bigint":
+      return JSON.stringify(value.toString());
+    case "string":
+    case "boolean":
+      return JSON.stringify(value);
+    case "number":
+      if (!Number.isFinite(value)) {
+        throw new TypeError("canonicalJson: non-finite number");
+      }
+      return JSON.stringify(value);
+    case "function":
+    case "symbol":
+    case "undefined":
       throw new TypeError(`canonicalJson: unsupported type ${typeof value}`);
+  }
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => (v === undefined ? "null" : serialize(v))).join(",")}]`;
+  }
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+
+  const record = value as Record<string, unknown>;
+  const members: string[] = [];
+  for (const key of Object.keys(record).sort()) {
+    const member = record[key];
+    if (member !== undefined) {
+      members.push(`${JSON.stringify(key)}:${serialize(member)}`);
     }
-    return value;
   }
-  if (Array.isArray(value))
-    return value.map((v) => (v === undefined ? null : normalize(v)));
-  if (value instanceof Date) return value.toISOString();
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) {
-    const member = (value as Record<string, unknown>)[key];
-    if (member !== undefined) out[key] = normalize(member);
-  }
-  return out;
+  return `{${members.join(",")}}`;
 }
 
 export function sha256Hex(input: string): string {

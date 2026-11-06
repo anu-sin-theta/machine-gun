@@ -9,7 +9,7 @@ export default defineConfig({
     exclude: process.env.LIVE === "1" ? [] : ["tests/live/**"],
     coverage: {
       provider: "v8",
-      include: ["src/core/**"],
+      include: ["src/core/**", "src/rust/index.ts"],
       reporter: ["text"],
       thresholds: { lines: 95, branches: 90, functions: 95, statements: 95 },
     },

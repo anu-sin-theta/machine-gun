@@ -10,13 +10,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Toolchain version comes from rust/rust-toolchain.toml (1.99.1 + wasm32 target).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      # Must match the wasm-bindgen crate version pinned in rust/kavach-wasm/Cargo.toml.
+      - run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+
       - run: pnpm lint
+      - run: pnpm lint:rust
       - run: pnpm typecheck
+      - run: pnpm test:rust
+      # Fails if src/rust/pkg (committed, generated) differs from a fresh build.
+      - run: pnpm build:wasm:check
       - run: pnpm test:coverage
       - run: pnpm build
