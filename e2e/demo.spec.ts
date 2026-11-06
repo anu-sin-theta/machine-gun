@@ -229,3 +229,47 @@ test.describe("input handling", () => {
     );
   });
 });
+
+test.describe("the verifier network", () => {
+  test("shows the registered verifiers with what they charge", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const network = page.getByTestId("verifier-network");
+    await expect(network).toBeVisible();
+    await expect(page.getByTestId("verifier")).toHaveCount(3);
+    await expect(network).toContainText("Payee reputation");
+    await expect(network).toContainText("Link intelligence");
+    await expect(network).toContainText("Domain heuristics");
+    await expect(network).toContainText("0.05 HBAR per call");
+    await expect(network).toContainText("0.02 HBAR per call");
+  });
+
+  test("consults more than one verifier on a link and shows each by name", async ({
+    page,
+  }) => {
+    await run(page, "scam");
+    const why = page.getByTestId("why");
+    await expect(why).toContainText("link-intel: BRAND_IMPERSONATION");
+    await expect(why).toContainText("domain-heuristics: RISKY_TLD");
+  });
+
+  test("serves the registry over the API, with filters", async ({
+    request,
+  }) => {
+    const all = await (await request.get("/api/agents")).json();
+    expect(all.agents.map((a: { id: string }) => a.id).sort()).toEqual([
+      "kavach-domain-heuristics",
+      "kavach-link-intel",
+      "kavach-reputation",
+      "kavach-scribe",
+    ]);
+    const payee = await (await request.get("/api/agents?input=payee")).json();
+    expect(payee.agents).toHaveLength(1);
+    expect(payee.agents[0]).toMatchObject({
+      price: "0.05 HBAR",
+      priceTinybars: "5000000",
+    });
+    expect((await request.get("/api/agents?role=oracle")).status()).toBe(400);
+  });
+});

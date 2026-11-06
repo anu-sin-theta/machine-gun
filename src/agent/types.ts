@@ -10,6 +10,7 @@ import type { HcsLogs } from "@/adapters/hedera";
 import type { ApprovalDeps } from "@/adapters/world";
 import type { Evidence, ZeroG } from "@/adapters/zerog";
 import type { Decision, PolicyConfig, RiskVerdict } from "@/core";
+import type { AgentListing, Subject } from "@/marketplace/types";
 
 export const checkInputSchema = z.object({
   /** The payment request as the user received it: invoice text, message, note. */
@@ -31,9 +32,15 @@ export interface ResourceProbe {
   challenge(resourceUrl: string): Promise<Challenge>;
 }
 
-export interface Checkers {
-  link(url: string): Promise<Evidence>;
-  reputation(payee: string): Promise<Evidence>;
+/**
+ * The agent's paid evidence market. `list` says which registered verifiers to
+ * consult for a kind of question (the directory already picked them: active,
+ * cheapest first, within budget); `call` pays one and returns its evidence
+ * under that verifier's own name.
+ */
+export interface VerifierNetwork {
+  list(kind: Subject["kind"]): Promise<AgentListing[]>;
+  call(verifier: AgentListing, subject: Subject): Promise<Evidence>;
 }
 
 export interface MerchantPayer {
@@ -49,7 +56,7 @@ export type AuditLog = Pick<HcsLogs, "recordAudit" | "reportPayee">;
 export interface AgentDeps {
   repos: Repositories;
   zerog: ZeroG;
-  checkers: Checkers;
+  verifiers: VerifierNetwork;
   probe: ResourceProbe;
   payer: MerchantPayer;
   /** null disables on-chain logging (audit and reputation). */
@@ -60,7 +67,10 @@ export interface AgentDeps {
   random: (bytes: number) => string;
 }
 
-export type AgentErrorKind = "RESOURCE_NOT_PAYABLE" | "PAYMENT_FAILED";
+export type AgentErrorKind =
+  | "RESOURCE_NOT_PAYABLE"
+  | "PAYMENT_FAILED"
+  | "VERIFIER_REJECTED";
 
 export class AgentError extends Error {
   constructor(

@@ -19,7 +19,7 @@ A simulated World approves whoever is at the keyboard. A public demo deployment 
    ```bash
    DATABASE_URL="postgres://..." pnpm db:migrate
    ```
-   It is idempotent. A serverless deployment **needs** a database: the in-memory store is per instance, so an approval started on one instance could not be completed on another. `GET /api/status` fails the deployment if `DATABASE_URL` is missing on Vercel.
+   It is idempotent and creates the tables, including the agent registry (`agents`, seeded on first use with the three built-in verifiers and the demo worker), buyer `accounts` and `tasks`. A serverless deployment **needs** a database: the in-memory store is per instance, so an approval started on one instance could not be completed on another. `GET /api/status` fails the deployment if `DATABASE_URL` is missing on Vercel.
 2. **Simulator key (demo deployments).** `pnpm gen:sim-key` prints a `WORLD_SIM_KEY` line. Without it each serverless instance signs World ID tokens with its own key and an approval can fail at random.
 3. **Vercel project.** Import the repository. The root directory is the folder that contains `package.json`. Framework: Next.js. Node 22. The default install and build commands work: the WebAssembly is committed, so the build needs no Rust.
 4. **Environment variables** (Production), below.
@@ -44,7 +44,7 @@ A simulated World approves whoever is at the keyboard. A public demo deployment 
 | `WORLD_MODE` | `simulated` | unset | |
 | `WORLD_SIM_KEY` | yes | no | From `pnpm gen:sim-key`. Secret |
 | `WORLD_SIM_SECRET` | optional | no | 16+ characters; replaces the built-in dev value |
-| `API_TOKEN` | optional | **yes** | 16+ characters. Protects `/api/checks`, `/api/checks/[id]`, `/api/status` |
+| `API_TOKEN` | optional | **yes** | 16+ characters. Protects `/api/checks`, `/api/checks/[id]`, `/api/status`, and is the only way to activate or suspend a registry listing (`POST /api/agents/[id]/status`) and, in live mode, to issue buyer accounts (`POST /api/accounts`); with no token nobody can |
 | `HEDERA_AGENT_ACCOUNT_ID`, `HEDERA_AGENT_PRIVATE_KEY` | no | yes | Funded testnet account. The key is the DER string from portal.hedera.com |
 | `HEDERA_PAYEE_ACCOUNT_ID` | no | yes | Must already exist |
 | `HEDERA_HCS_AUDIT_TOPIC_ID`, `HEDERA_HCS_REPUTATION_TOPIC_ID` | no | recommended | From `pnpm setup:hedera`. Without them logging is off |
@@ -52,7 +52,7 @@ A simulated World approves whoever is at the keyboard. A public demo deployment 
 | `ZG_TRUST_MODE` | no | optional | `private` (default) or `verified` |
 | `WORLD_CLIENT_ID`, `WORLD_CLIENT_SECRET` | no | yes | From the World developer portal. Setting these together with `WORLD_MODE=simulated` is an error |
 | `WORLD_REDIRECT_URI` | no | optional | Only if it differs from the default |
-| `MERCHANT_ORIGINS` | no | optional | Extra origins the agent may fetch merchants from (the app's own origin is always allowed) |
+| `MERCHANT_ORIGINS` | no | optional | Extra origins the agent may fetch merchants from (the app's own origin is always allowed). Live mode also accepts the origins of active merchant listings in the registry |
 | `POLICY_HBAR_AUTO_CAP`, `POLICY_HBAR_HARD_CAP`, `POLICY_HBAR_DAILY_AUTO_BUDGET` | optional | optional | Tinybars. Defaults 2, 50 and 5 HBAR |
 | `APPROVAL_TTL_SECONDS` | optional | optional | 30 to 3600, default 600 |
 
@@ -68,4 +68,4 @@ A malformed value stops the app with a message that names the variable; a half-f
 
 ## Rollback
 
-Redeploy the previous deployment in Vercel. The migration only creates tables, so there is nothing to undo for a code rollback. To start over on the database, drop the four tables (`checks`, `pending_approvals`, `auto_spend_ledger`, `used_nonces`) and the `drizzle` schema, then run `pnpm db:migrate` again.
+Redeploy the previous deployment in Vercel. The migration only creates tables, so there is nothing to undo for a code rollback. To start over on the database, drop the tables (`checks`, `pending_approvals`, `auto_spend_ledger`, `used_nonces`, `agents`, `accounts`, `tasks`) and the `drizzle` schema, then run `pnpm db:migrate` again.

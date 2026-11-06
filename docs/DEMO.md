@@ -23,7 +23,10 @@ Say: with real World that would be a human with an Orb credential, but the polic
 Say: the approval is bound to this exact payment (amount, payee, merchant, verdict) and can be spent once. The audit trail says `source:simulated`, so a simulated approval is never mistaken for a real one.
 Optional: copy the callback URL from the browser history and open it again. It answers `not_pending`: a replay cannot pay twice.
 
-**5. The other three cases, quickly.**
+**5. The verifier network.** Scroll to the card under the form, or look at *Why* on the scam result.
+Say: the agent does not have two hard-coded checkers; it asks a registry which verifiers to pay for each question, cheapest first. Two independent verifiers looked at that link (link intelligence and a lighter domain-heuristics one) and each speaks under its own name. `GET /api/agents` is the same list. Other agents would plug in here; [docs/MARKETPLACE.md](MARKETPLACE.md) says exactly what they must build and what is not built yet (registering is not open to strangers yet).
+
+**6. The other three cases, quickly.**
 - *Wrong account*: the text asks to pay `0.0.9999` but the merchant would pay `0.0.5001`. High risk, held.
 - *Rent (over the limit)*: low risk but 12 HBAR is over the 2 HBAR auto-pay cap, so it asks for an ordinary login.
 - *Tuition (too large)*: 60 HBAR is over the hard cap. Blocked outright, no approval offered.

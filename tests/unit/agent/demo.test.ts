@@ -8,7 +8,8 @@ import {
   getDemoAudit,
   resetDemoState,
 } from "@/agent/demo";
-import { makeHarness } from "./harness";
+import { builtInListings } from "@/marketplace/builtins";
+import { LISTINGS, makeHarness } from "./harness";
 
 const ORIGIN = "http://localhost:3000";
 const merchant = (path: string) => `${ORIGIN}${path}`;
@@ -19,10 +20,32 @@ const SCAM =
 
 beforeEach(() => resetDemoState());
 
+/** A built-in listing by evidence name (the harness has two; the heuristics one is built separately). */
+function listing(source: string) {
+  const found = [
+    ...LISTINGS,
+    ...builtInListings({ baseUrl: ORIGIN, payTo: DEMO_PAYEE, now: 0 }),
+  ].find((l) => l.evidenceSource === source);
+  if (!found) throw new Error(`no listing ${source}`);
+  return found;
+}
+
 /** The real pipeline, real policy and approval flow, with demo ports. */
 async function demo() {
   const h = await makeHarness();
-  Object.assign(h.deps, createDemoPorts([ORIGIN]));
+  const { callVerifier, ...ports } = createDemoPorts([ORIGIN]);
+  const listings = builtInListings({
+    baseUrl: ORIGIN,
+    payTo: DEMO_PAYEE,
+    now: 0,
+  });
+  Object.assign(h.deps, ports, {
+    verifiers: {
+      list: async (kind: "link" | "payee") =>
+        listings.filter((l) => l.input === kind),
+      call: callVerifier,
+    },
+  });
   const run = (text: string, path = "/api/x402/merchant/electricity") =>
     runCheck(h.deps, { text, resource: merchant(path) });
   return { h, run };
@@ -98,12 +121,54 @@ describe("demo ports", () => {
     });
   });
 
-  it("runs the real link analysis", async () => {
-    const { checkers } = createDemoPorts([ORIGIN]);
+  it("runs the real link analysis, under the listing's own name", async () => {
+    const { callVerifier } = createDemoPorts([ORIGIN]);
+    const linkIntel = listing("link-intel");
+    const hit = await callVerifier(linkIntel, {
+      kind: "link",
+      url: "https://paypa1.com.account-verify.top",
+    });
+    expect(hit).toMatchObject({ source: "link-intel", level: "high" });
+    const clean = await callVerifier(linkIntel, {
+      kind: "link",
+      url: "https://www.paypal.com/",
+    });
+    expect(clean.level).toBe("low");
+  });
+
+  it("runs the independent heuristics as a second opinion that can disagree", async () => {
+    const { callVerifier } = createDemoPorts([ORIGIN]);
+    const heuristics = listing("domain-heuristics");
     expect(
-      (await checkers.link("https://paypa1.com.account-verify.top")).level,
-    ).toBe("high");
-    expect((await checkers.link("https://www.paypal.com/")).level).toBe("low");
+      await callVerifier(heuristics, {
+        kind: "link",
+        url: "https://pay.example.top/x",
+      }),
+    ).toMatchObject({
+      source: "domain-heuristics",
+      level: "medium",
+      detail: "RISKY_TLD",
+    });
+  });
+
+  it("refuses a question a listing does not answer, or a verifier it has no stand-in for", async () => {
+    const { callVerifier } = createDemoPorts([ORIGIN]);
+    await expect(
+      callVerifier(listing("link-intel"), {
+        kind: "payee",
+        account: "0.0.5001",
+      }),
+    ).rejects.toMatchObject({ kind: "VERIFIER_REJECTED" });
+    await expect(
+      callVerifier(
+        {
+          ...listing("link-intel"),
+          id: "third-party",
+          evidenceSource: "third-party",
+        },
+        { kind: "link", url: "https://a.example" },
+      ),
+    ).rejects.toMatchObject({ kind: "VERIFIER_REJECTED" });
   });
 });
 
@@ -122,10 +187,13 @@ describe("the whole loop in demo mode", () => {
       "check.decision",
       "payment.settled",
     ]);
-    const { checkers } = createDemoPorts([ORIGIN]);
-    expect((await checkers.reputation(DEMO_PAYEE)).detail).toContain(
-      "1 paid ok",
-    );
+    const { callVerifier } = createDemoPorts([ORIGIN]);
+    const evidence = await callVerifier(listing("reputation"), {
+      kind: "payee",
+      account: DEMO_PAYEE,
+    });
+    expect(evidence).toMatchObject({ source: "reputation" });
+    expect(evidence.detail).toContain("1 paid ok");
   });
 
   it("holds a scam for the strongest approval", async () => {
@@ -140,6 +208,23 @@ describe("the whole loop in demo mode", () => {
     expect(
       out.verdict?.reasons.some((r) => r.includes("BRAND_IMPERSONATION")),
     ).toBe(true);
+  });
+
+  it("consults all three built-in verifiers and records who answered", async () => {
+    const { run } = await demo();
+    const out = await run(SCAM);
+    const verdict = getDemoAudit(out.checkId).find(
+      (e) => e.type === "check.verdict",
+    );
+    expect(verdict?.verifiers?.sort()).toEqual([
+      "domain-heuristics",
+      "link-intel",
+      "reputation",
+    ]);
+    // Both link verifiers speak under their own names and can be read in the reasons.
+    const reasons = (out.verdict?.reasons ?? []).join(" | ");
+    expect(reasons).toContain("link-intel: BRAND_IMPERSONATION");
+    expect(reasons).toContain("domain-heuristics: RISKY_TLD");
   });
 
   it("holds a request that names a different account", async () => {

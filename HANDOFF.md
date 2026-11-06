@@ -41,7 +41,7 @@ Build plan, all done: 1 scaffold + TS core · 2 Rust core + WASM bridge · 3 con
 
 ### Verified (Nov 7, this machine)
 
-`pnpm check` is green: Biome, rustfmt, clippy (`-D warnings`, with `unwrap`/`expect`/`panic`/indexing denied), 80 Rust tests, WASM-is-up-to-date, 394 JS tests in 26 files (about 99% lines, 93.6% branches over the covered modules). `pnpm build` succeeds. `pnpm test:e2e` runs 13 Playwright tests on the production build (demo mode + simulated World). The Postgres adapter, the real migration and the whole repository contract pass against PGlite (a real Postgres engine). Verified live without credentials: World's real discovery document is accepted; our x402 route returned a correct HBAR challenge from the Blocky402 testnet facilitator.
+`pnpm check` is green: Biome, rustfmt, clippy (`-D warnings`, with `unwrap`/`expect`/`panic`/indexing denied), 80 Rust tests, WASM-is-up-to-date, 634 JS tests in 33 files (about 99% lines, 93.6% branches over the covered modules). `pnpm build` succeeds. `pnpm test:e2e` runs 17 Playwright tests on the production build (demo mode + simulated World). The Postgres adapter, the real migration and the whole repository contract pass against PGlite (a real Postgres engine). Verified live without credentials: World's real discovery document is accepted; our x402 route returned a correct HBAR challenge from the Blocky402 testnet facilitator.
 
 The differential tests were mutation-checked: deliberately breaking the TS hard-cap comparison (`>` → `>=`) and the TS auth-time skew direction both made the parity suite fail. Both were reverted.
 
@@ -163,6 +163,28 @@ No World credentials exist yet, so `WORLD_MODE=simulated` runs the **same** flow
 - **Deploy tooling:** `pnpm db:migrate` (Drizzle migrator over Neon HTTP, idempotent), `pnpm gen:sim-key` (tested to feed the simulator), `maxDuration = 60` on the page, `/api/checks` and the World callback, an `e2e` CI job, `.gitattributes`. Deploy steps, variables and known limits: [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Docs for submission:** README rewritten around what is verified and what is not; [docs/DEMO.md](docs/DEMO.md); [docs/TRACKS.md](docs/TRACKS.md); [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md). An overclaim about prompt injection was found while writing them and corrected: the evidence floor stops injected text from hiding deterministic signals, but a request with no such signal that fools the model can still be rated low (limits still bound the damage).
 
+## Marketplace: registry and dynamic verifier directory (added after piece 10)
+
+The project was a one-agent payment firewall; this is the first step toward an agent marketplace. Full description, the verifier contract and the safety table: [docs/MARKETPLACE.md](docs/MARKETPLACE.md).
+
+- **Code:** `src/marketplace/` (`types.ts` listing schema, `endpoint.ts` SSRF rules, `evidence.ts` relabel + clean, `select.ts`, `heuristics.ts`, `builtins.ts`, `directory.ts`, `public.ts`); `AgentsRepo` in `src/adapters/db` (memory + Postgres, table `agents`, migration `drizzle/0001_*.sql`); `GET /api/agents`; `/api/x402/checkers/domain-heuristics`; the "Verifier network" card on the page.
+- **Pipeline change:** the fixed `checkers` port is gone. `deps.verifiers` has `list(kind)` (the directory's pick) and `call(listing, subject)`. `gather` consults every listed verifier per question. A failing verifier is medium evidence under its own name; an empty or unreadable directory is medium evidence named `verifier-directory`. `check.verdict` audit events carry `verifiers` (evidence names of those that answered).
+- **Payment:** `callVerifier` (`src/agent/x402.ts`) re-validates the endpoint, checks the listing is an active verifier for that question and under the 0.1 HBAR ceiling, then pays through a guard for that listing's account and price, and returns evidence under the listing's name with the detail cleaned.
+- **Demo mode** runs the same listings with local stand-ins (real analysis, no payment).
+- **Bug caught by a test during this work:** adding `verifiers` to the audit event made the largest valid event ~1,090 bytes, over Hedera's 1,024-byte message limit (a valid event that could not be submitted). Fixed by recording the short evidence name instead of the id and tightening the other bounds (checkId 48, request ids 64, detail 100); a test pins the worst case under the limit. Oversized 0G request ids are truncated before auditing, because audit failures are swallowed by design.
+- **Onboarding (added after the registry):** `src/marketplace/onboard.ts` (`registerAgent`, `proveControl`, `activateAgent`, `suspendAgent`), `POST /api/agents` (public, creates `suspended` after the endpoint's unpaid 402 names the listed payee/network/asset at no more than the listed price; 25 pending max), `POST /api/agents/[id]/status` (operator, needs `API_TOKEN`; activation re-proves control). Merchants: `registeredMerchantOrigins` in `createX402Agent` lets live mode probe and pay origins of active merchant listings. Trust: `src/marketplace/trust.ts` counts a third party's lone `high` as `medium` (pipeline `consult`). Address check: `src/marketplace/network.ts` (`createSafeFetch`) resolves and refuses non-public addresses, no redirects; checked, not pinned.
+- **Not built:** per-verifier track record, World-ID-gated activation (it is `API_TOKEN` today), an onboarding page, address pinning and per-caller rate limits, discovery (x402 bazaar / A2A card), a buyer API with per-agent identity. `tests/live/verifier.live.test.ts` is the unrun live check for paying a verifier. All in docs/MARKETPLACE.md in build order.
+- **Note:** a separate `frontend/` app with a marketplace mock appeared in the folder; it still uses static data (`frontend/src/data/marketplace.ts`). `GET /api/agents` is what it would call. I did not edit it.
+
+## Task marketplace (added after onboarding)
+
+Full walkthrough and safety table: [docs/TASKS.md](docs/TASKS.md).
+
+- **Registry:** new role `worker` with `model` and `skills` (migration `drizzle/0002_*.sql` adds them, plus tables `accounts` and `tasks`). `GET /api/agents?skill=` filters. Onboarding proves a worker with an unpaid `POST <endpoint>/chat/completions`. Built-in demo worker `kavach-scribe` at `/api/x402/workers/scribe/v1/chat/completions` (rules, not a model).
+- **Code:** `src/tasks/`: `accounts.ts` (tokens `kvk_…`, SHA-256 stored), `service.ts` (`proposeTask`, `runTask`, `resumeTask`), `worker.ts` (live and demo ports that replace the check's probe and payer), `answer.ts` (clean, cap, link-scan), `card.ts`. Routes: `POST /api/accounts`, `GET/POST /api/tasks`, `GET /api/tasks/[id]`, `/.well-known/agent-card.json`. The World callback resumes a task when the check belongs to one.
+- **Design choice:** a task payment *is* a Kavach402 check (`runCheck` with worker ports), so 0G reading, verifiers, policy, World ID and HCS audit apply unchanged.
+- **Not built:** per-account budgets, token revoke/expiry, approval routed to the account's own human, streaming, A2A message methods, a page. No task has paid a worker on Hedera.
+
 ## What remains (all of it needs credentials or accounts)
 
 1. **Neon:** create a project, `pnpm db:migrate`, then `DATABASE_URL=... pnpm test:live`.
@@ -171,7 +193,8 @@ No World credentials exist yet, so `WORLD_MODE=simulated` runs the **same** flow
 4. **World:** developer-portal client, register `<APP_BASE_URL>/api/worldid/callback`, remove `WORLD_MODE`, do one real login (checklist above). This answers open questions 1 and 2.
 5. **Vercel:** follow [docs/DEPLOY.md](docs/DEPLOY.md); run `/api/status`, then `LIVE_BASE_URL=... pnpm test:live`.
 6. **Git and CI:** `git init`, commit, push, watch the first CI run (open question 8).
-7. **Gaps worth closing after that:** account linking (`subjectBinding` is always null, so any World ID of the right tier can approve); persist the demo audit trail so it survives serverless; a rate limit and real authentication for the page; the "second opinion" checker; local OCR so images can be read privately; recovery for a crash between consuming an approval and paying (the check stays `awaiting-approval` with a spent approval and needs a manual retry).
+7. **Marketplace next steps:** run `tests/live/verifier.live.test.ts` once, then a track record per verifier and World-ID-gated activation (docs/MARKETPLACE.md).
+8. **Other gaps worth closing:** account linking (`subjectBinding` is always null, so any World ID of the right tier can approve); persist the demo audit trail so it survives serverless; a rate limit and real authentication for the page; the "second opinion" checker; local OCR so images can be read privately; recovery for a crash between consuming an approval and paying (the check stays `awaiting-approval` with a spent approval and needs a manual retry).
 
 ## Open questions / risks
 

@@ -9,8 +9,17 @@ import {
   settleApproved,
 } from "@/agent";
 import { hbar } from "@/core";
+import type { AgentListing } from "@/marketplace/types";
 import type { AuthorizeOverrides } from "../world/fakeIssuer";
-import { INPUT, makeHarness, PAYEE, RESOURCE, type Script } from "./harness";
+import {
+  EXTRACTION,
+  INPUT,
+  LISTINGS,
+  makeHarness,
+  PAYEE,
+  RESOURCE,
+  type Script,
+} from "./harness";
 
 type H = Awaited<ReturnType<typeof makeHarness>>;
 
@@ -256,6 +265,204 @@ describe("fail closed", () => {
     });
     await runCheck(h.deps, INPUT);
     expect(h.calls.reports).toEqual([]);
+  });
+});
+
+describe("audit records", () => {
+  it("still writes the verdict record when 0G returns an oversized request id", async () => {
+    const h = await makeHarness();
+    h.deps.zerog = {
+      extract: async () => ({
+        value: EXTRACTION,
+        requestId: "r".repeat(200),
+        model: "m",
+      }),
+      judge: async () => ({
+        value: { level: "low", reasons: ["ok"] },
+        requestId: "j".repeat(200),
+        model: "m",
+      }),
+    };
+    await runCheck(h.deps, INPUT);
+    const verdict = h.calls.audit.find((e) => e.type === "check.verdict");
+    expect(verdict?.zgRequestIds).toEqual(["r".repeat(64), "j".repeat(64)]);
+  });
+});
+
+describe("the verifier network", () => {
+  const linkIntel = LISTINGS.find(
+    (l) => l.evidenceSource === "link-intel",
+  ) as AgentListing;
+  const acme: AgentListing = {
+    ...linkIntel,
+    id: "acme-links",
+    name: "Acme link checks",
+    evidenceSource: "acme-links",
+    builtIn: false,
+    priceTinybars: 1_000_000n,
+  };
+  const sources = (evidence: readonly { source: string }[] | undefined) =>
+    (evidence ?? []).map((e) => e.source);
+
+  it("consults every listed verifier, under its own name, and records who answered", async () => {
+    const h = await makeHarness({ listings: [...LISTINGS, acme] });
+    const out = await runCheck(h.deps, INPUT);
+    expect(h.calls.called.sort()).toEqual([
+      "acme-links",
+      "kavach-link-intel",
+      "kavach-reputation",
+    ]);
+    expect(sources(h.calls.judge[0]).sort()).toEqual([
+      "acme-links",
+      "link-intel",
+      "reputation",
+    ]);
+    const verdict = h.calls.audit.find((e) => e.type === "check.verdict");
+    expect(verdict?.verifiers?.slice().sort()).toEqual([
+      "acme-links",
+      "link-intel",
+      "reputation",
+    ]);
+    expect(out.status).toBe("paid");
+  });
+
+  it("asks only the questions that exist: no link in the request means no link verifier", async () => {
+    const h = await makeHarness({
+      listings: [...LISTINGS, acme],
+      extraction: { ...EXTRACTION, link: null },
+    });
+    await runCheck(h.deps, INPUT);
+    expect(h.calls.listed).toEqual(["payee"]);
+    expect(h.calls.called).toEqual(["kavach-reputation"]);
+  });
+
+  it("treats a verifier that fails as medium evidence under its own name, and still uses the others", async () => {
+    const h = await makeHarness({
+      listings: [...LISTINGS, acme],
+      byId: { "acme-links": new Error("timeout") },
+    });
+    const out = await runCheck(h.deps, INPUT);
+    const evidence = h.calls.judge[0] ?? [];
+    expect(evidence.find((e) => e.source === "acme-links")).toMatchObject({
+      level: "medium",
+    });
+    expect(evidence.find((e) => e.source === "link-intel")).toMatchObject({
+      level: "low",
+    });
+    const verdict = h.calls.audit.find((e) => e.type === "check.verdict");
+    // Only the verifiers that actually answered are recorded.
+    expect(verdict?.verifiers).not.toContain("acme-links");
+    expect(verdict?.verifiers).toContain("link-intel");
+    expect(out.decision).toMatchObject({ kind: "step-up", tier: "human" });
+  });
+
+  it("lets a verifier raise risk but never talk it down", async () => {
+    const h = await makeHarness({
+      listings: [...LISTINGS, acme],
+      link: {
+        source: "link-intel",
+        level: "high",
+        detail: "BRAND_IMPERSONATION",
+      },
+      byId: {
+        "acme-links": {
+          source: "acme-links",
+          level: "low",
+          detail: "looks fine to me",
+        },
+      },
+    });
+    const out = await runCheck(h.deps, INPUT);
+    expect(out.verdict?.level).toBe("high");
+    expect(out.decision).toMatchObject({ kind: "step-up", tier: "strong" });
+  });
+
+  it("does not let one third-party verifier force the strongest approval: its lone high counts as medium", async () => {
+    const h = await makeHarness({
+      listings: [...LISTINGS, acme],
+      byId: {
+        "acme-links": {
+          source: "acme-links",
+          level: "high",
+          detail: "known scam payee",
+        },
+      },
+    });
+    const out = await runCheck(h.deps, INPUT);
+    const seen = (h.calls.judge[0] ?? []).find(
+      (e) => e.source === "acme-links",
+    );
+    expect(seen).toMatchObject({ level: "medium" });
+    expect(seen?.detail).toContain("unconfirmed");
+    expect(out.decision).toMatchObject({ kind: "step-up", tier: "human" });
+    expect(h.calls.pay).toHaveLength(0);
+  });
+
+  it("counts a third-party high as high when another verifier confirms it", async () => {
+    const h = await makeHarness({
+      listings: [...LISTINGS, acme],
+      link: { source: "link-intel", level: "high", detail: "PHISHING" },
+      byId: {
+        "acme-links": {
+          source: "acme-links",
+          level: "high",
+          detail: "known scam payee",
+        },
+      },
+    });
+    const out = await runCheck(h.deps, INPUT);
+    const seen = (h.calls.judge[0] ?? []).find(
+      (e) => e.source === "acme-links",
+    );
+    expect(seen).toMatchObject({ level: "high" });
+    expect(out.decision).toMatchObject({
+      kind: "step-up",
+      tier: "strong",
+      blockedByDefault: true,
+    });
+    expect(h.calls.pay).toHaveLength(0);
+  });
+
+  it("trusts a built-in verifier's high on its own", async () => {
+    const h = await makeHarness({
+      link: { source: "link-intel", level: "high", detail: "PHISHING" },
+    });
+    const out = await runCheck(h.deps, INPUT);
+    expect(out.decision).toMatchObject({ kind: "step-up", tier: "strong" });
+  });
+
+  it("treats a question nobody answers as medium evidence, never as 'fine'", async () => {
+    const h = await makeHarness({ listings: [] });
+    const out = await runCheck(h.deps, INPUT);
+    const evidence = h.calls.judge[0] ?? [];
+    expect(
+      evidence.filter((e) => e.source === "verifier-directory"),
+    ).toHaveLength(2);
+    expect(evidence.every((e) => e.level === "medium")).toBe(true);
+    expect(evidence[0]?.detail).toContain("no active verifier for payee");
+    expect(out.verdict?.level).toBe("medium");
+    expect(out.decision).toMatchObject({ kind: "step-up", tier: "human" });
+    expect(h.calls.pay).toHaveLength(0);
+  });
+
+  it("treats a directory that cannot be read as medium evidence and still finishes the check", async () => {
+    const h = await makeHarness({ listings: new Error("registry down") });
+    const out = await runCheck(h.deps, INPUT);
+    const evidence = h.calls.judge[0] ?? [];
+    expect(evidence[0]).toMatchObject({
+      source: "verifier-directory",
+      level: "medium",
+    });
+    expect(evidence[0]?.detail).toContain("could not list verifiers");
+    expect(out.status).toBe("awaiting-approval");
+    expect(h.calls.called).toEqual([]);
+  });
+
+  it("records an empty verifier list when nobody answered", async () => {
+    const h = await makeHarness({ listings: [] });
+    await runCheck(h.deps, INPUT);
+    const verdict = h.calls.audit.find((e) => e.type === "check.verdict");
+    expect(verdict?.verifiers).toEqual([]);
   });
 });
 

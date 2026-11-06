@@ -4,6 +4,9 @@ import { getHcsLogs, HederaError } from "@/adapters/hedera";
 import { getApprovalDeps } from "@/adapters/world";
 import { getZeroG } from "@/adapters/zerog";
 import { getConfig } from "@/config/env";
+import { getDirectory } from "@/marketplace";
+import { isLocalOrigin } from "@/marketplace/endpoint";
+import { createSafeFetch } from "@/marketplace/network";
 import { createDemoPorts } from "./demo";
 import type { AgentDeps } from "./types";
 import { createX402Agent } from "./x402";
@@ -17,10 +20,14 @@ export function getAgentDeps(): AgentDeps {
   const config = getConfig();
   const { hedera } = config;
 
+  const directory = getDirectory();
+
   if (config.agentMode === "demo") {
+    const { callVerifier, ...ports } = createDemoPorts(config.merchantOrigins);
     return {
       repos: getRepositories(),
-      ...createDemoPorts(config.merchantOrigins),
+      ...ports,
+      verifiers: { list: (kind) => directory.list(kind), call: callVerifier },
       approval: getApprovalDeps(),
       policy: config.policy,
       now: () => Date.now(),
@@ -42,19 +49,25 @@ export function getAgentDeps(): AgentDeps {
     network: `hedera:${hedera.network}`,
     accountId: hedera.agentAccountId,
     privateKey: hedera.agentPrivateKey,
-    baseUrl: config.baseUrl,
-    checkerPayTo: hedera.payeeAccountId,
     merchantOrigins: config.merchantOrigins,
+    allowLocalEndpoints: isLocalOrigin(config.baseUrl),
+    safeFetch: createSafeFetch({ allowLocal: isLocalOrigin(config.baseUrl) }),
+    registeredMerchantOrigins: async () =>
+      (await directory.all({ role: "merchant", status: "active" })).map(
+        (m) => new URL(m.endpoint).origin,
+      ),
   });
 
   // Audit and reputation logging is optional: without topics the agent still works.
   let logs: AgentDeps["logs"] = null;
   if (hedera.auditTopicId && hedera.reputationTopicId) logs = getHcsLogs();
 
+  const { callVerifier, ...ports } = x402;
   return {
     repos: getRepositories(),
     zerog: getZeroG(),
-    ...x402,
+    ...ports,
+    verifiers: { list: (kind) => directory.list(kind), call: callVerifier },
     logs,
     approval: getApprovalDeps(),
     policy: config.policy,

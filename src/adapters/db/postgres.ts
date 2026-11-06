@@ -5,7 +5,7 @@
  * atomic compare-and-set and the upserts.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type {
   Amount,
@@ -13,13 +13,24 @@ import type {
   BoundAction,
   PendingApproval,
 } from "@/core";
+import type {
+  AgentFilter,
+  AgentListing,
+  AgentStatus,
+} from "@/marketplace/types";
+import type { AccountRecord, TaskPatch, TaskRecord } from "@/tasks/types";
 import {
+  accounts,
+  agents,
   autoSpendLedger,
   checks,
   pendingApprovals,
+  tasks,
   usedNonces,
 } from "./schema";
 import type {
+  AccountsRepo,
+  AgentsRepo,
   ApprovalsRepo,
   CheckPatch,
   CheckRecord,
@@ -27,6 +38,7 @@ import type {
   NoncesRepo,
   Repositories,
   SpendLedgerRepo,
+  TasksRepo,
 } from "./types";
 
 // biome-ignore lint/suspicious/noExplicitAny: the schema type parameter does not matter here.
@@ -94,6 +106,160 @@ function toApproval(row: ApprovalRow): PendingApproval {
 }
 
 // --- repositories ----------------------------------------------------------
+
+type AgentRow = typeof agents.$inferSelect;
+
+function toAgent(row: AgentRow): AgentListing {
+  return {
+    id: row.id,
+    role: row.role as AgentListing["role"],
+    name: row.name,
+    description: row.description,
+    endpoint: row.endpoint,
+    input: row.input as AgentListing["input"],
+    payTo: row.payTo,
+    priceTinybars: BigInt(row.priceTinybars),
+    evidenceSource: row.evidenceSource,
+    model: row.model,
+    skills: row.skills as string[],
+    status: row.status as AgentListing["status"],
+    builtIn: row.builtIn,
+    createdAt: row.createdAt,
+  };
+}
+
+class PgAgents implements AgentsRepo {
+  constructor(private readonly db: Db) {}
+
+  async create(listing: AgentListing): Promise<boolean> {
+    // No conflict target: either unique constraint (id, evidence name) counts as "taken".
+    const rows = await this.db
+      .insert(agents)
+      .values({ ...listing, priceTinybars: listing.priceTinybars.toString() })
+      .onConflictDoNothing()
+      .returning({ id: agents.id });
+    return rows.length === 1;
+  }
+
+  async get(id: string): Promise<AgentListing | null> {
+    const [row] = await this.db.select().from(agents).where(eq(agents.id, id));
+    return row ? toAgent(row) : null;
+  }
+
+  async list(filter: AgentFilter = {}): Promise<AgentListing[]> {
+    const conditions = [
+      filter.role ? eq(agents.role, filter.role) : undefined,
+      filter.status ? eq(agents.status, filter.status) : undefined,
+      filter.input ? eq(agents.input, filter.input) : undefined,
+      filter.skill
+        ? sql`${agents.skills} @> ${JSON.stringify([filter.skill])}::jsonb`
+        : undefined,
+    ].filter((c): c is NonNullable<typeof c> => Boolean(c));
+    const rows = await this.db
+      .select()
+      .from(agents)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(asc(agents.createdAt), asc(agents.id));
+    return rows.map(toAgent);
+  }
+
+  async setStatus(id: string, status: AgentStatus): Promise<boolean> {
+    const rows = await this.db
+      .update(agents)
+      .set({ status })
+      .where(eq(agents.id, id))
+      .returning({ id: agents.id });
+    return rows.length === 1;
+  }
+}
+
+class PgAccounts implements AccountsRepo {
+  constructor(private readonly db: Db) {}
+
+  async create(account: AccountRecord): Promise<boolean> {
+    const rows = await this.db
+      .insert(accounts)
+      .values(account)
+      .onConflictDoNothing()
+      .returning({ id: accounts.id });
+    return rows.length === 1;
+  }
+
+  async get(id: string): Promise<AccountRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, id));
+    return row ? toAccount(row) : null;
+  }
+
+  async getByTokenHash(tokenHash: string): Promise<AccountRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.tokenHash, tokenHash));
+    return row ? toAccount(row) : null;
+  }
+}
+
+type AccountRow = typeof accounts.$inferSelect;
+const toAccount = (row: AccountRow): AccountRecord => ({
+  ...row,
+  status: row.status as AccountRecord["status"],
+});
+
+type TaskRow = typeof tasks.$inferSelect;
+const toTask = (row: TaskRow): TaskRecord => ({
+  ...row,
+  maxPriceTinybars: BigInt(row.maxPriceTinybars),
+  status: row.status as TaskRecord["status"],
+  warnings: row.warnings as TaskRecord["warnings"],
+  events: row.events as TaskRecord["events"],
+});
+
+class PgTasks implements TasksRepo {
+  constructor(private readonly db: Db) {}
+
+  async create(task: TaskRecord): Promise<void> {
+    await this.db.insert(tasks).values({
+      ...task,
+      maxPriceTinybars: task.maxPriceTinybars.toString(),
+    });
+  }
+
+  async get(id: string): Promise<TaskRecord | null> {
+    const [row] = await this.db.select().from(tasks).where(eq(tasks.id, id));
+    return row ? toTask(row) : null;
+  }
+
+  async getByCheckId(checkId: string): Promise<TaskRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.checkId, checkId));
+    return row ? toTask(row) : null;
+  }
+
+  async listByAccount(accountId: string, limit: number): Promise<TaskRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.accountId, accountId))
+      .orderBy(desc(tasks.createdAt), desc(tasks.id))
+      .limit(limit);
+    return rows.map(toTask);
+  }
+
+  async update(id: string, patch: TaskPatch): Promise<TaskRecord | null> {
+    if (Object.keys(patch).length === 0) return this.get(id);
+    const rows = await this.db
+      .update(tasks)
+      .set(patch)
+      .where(eq(tasks.id, id))
+      .returning();
+    return rows[0] ? toTask(rows[0]) : null;
+  }
+}
 
 class PgChecks implements ChecksRepo {
   constructor(private readonly db: Db) {}
@@ -222,6 +388,9 @@ class PgNonces implements NoncesRepo {
 
 export function createPostgresRepositories(db: Db): Repositories {
   return {
+    agents: new PgAgents(db),
+    accounts: new PgAccounts(db),
+    tasks: new PgTasks(db),
     checks: new PgChecks(db),
     approvals: new PgApprovals(db),
     spend: new PgSpend(db),

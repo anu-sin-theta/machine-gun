@@ -33,6 +33,8 @@ import {
   type Traced,
 } from "@/adapters/zerog";
 import { type Amount, assetKey, type RiskVerdict } from "@/core";
+import { weighEvidence } from "@/marketplace/trust";
+import type { AgentListing, Subject } from "@/marketplace/types";
 import { decide, hashAction } from "@/rust";
 import {
   type AgentDeps,
@@ -55,6 +57,8 @@ type AuditFields = {
   actionHash?: string;
   decision?: "auto-pay" | "step-up" | "block";
   zgRequestIds?: string[];
+  /** Evidence names of the verifiers that answered. */
+  verifiers?: string[];
   txId?: string;
   detail?: string;
 };
@@ -104,21 +108,77 @@ const unavailable = (source: string): Evidence => ({
   detail: "checker unavailable, treated as medium",
 });
 
+/**
+ * Asks every listed verifier about one subject. Silence is never "fine": a
+ * verifier that fails is medium evidence under its own name, a directory that
+ * fails or is empty is medium evidence too.
+ */
+async function consult(
+  deps: AgentDeps,
+  subject: Subject,
+): Promise<{ evidence: Evidence[]; used: string[] }> {
+  let verifiers: AgentListing[];
+  try {
+    verifiers = await deps.verifiers.list(subject.kind);
+  } catch {
+    return {
+      evidence: [
+        {
+          source: "verifier-directory",
+          level: "medium",
+          detail: `could not list verifiers for ${subject.kind} checks, treated as medium`,
+        },
+      ],
+      used: [],
+    };
+  }
+  if (verifiers.length === 0)
+    return {
+      evidence: [
+        {
+          source: "verifier-directory",
+          level: "medium",
+          detail: `no active verifier for ${subject.kind} checks, treated as medium`,
+        },
+      ],
+      used: [],
+    };
+
+  const results = await Promise.all(
+    verifiers.map(async (verifier) => {
+      try {
+        return {
+          evidence: await deps.verifiers.call(verifier, subject),
+          id: verifier.evidenceSource,
+          trusted: verifier.builtIn,
+        };
+      } catch {
+        return {
+          evidence: unavailable(verifier.evidenceSource),
+          id: null,
+          trusted: true,
+        };
+      }
+    }),
+  );
+  return {
+    // A third party's lone "high" counts as medium until another verifier confirms it.
+    evidence: weighEvidence(results),
+    used: results.flatMap((r) => (r.id ? [r.id] : [])),
+  };
+}
+
 async function gather(
   deps: AgentDeps,
   extraction: Extraction | null,
   challenge: Challenge,
-): Promise<Evidence[]> {
-  const jobs: Promise<Evidence>[] = [
-    deps.checkers
-      .reputation(challenge.payTo)
-      .catch(() => unavailable("reputation")),
-  ];
-  if (extraction?.link) {
-    const link = extraction.link;
-    jobs.push(deps.checkers.link(link).catch(() => unavailable("link-intel")));
-  }
-  const evidence = await Promise.all(jobs);
+): Promise<{ evidence: Evidence[]; verifierIds: string[] }> {
+  const subjects: Subject[] = [{ kind: "payee", account: challenge.payTo }];
+  if (extraction?.link) subjects.push({ kind: "link", url: extraction.link });
+
+  const consulted = await Promise.all(subjects.map((s) => consult(deps, s)));
+  const evidence = consulted.flatMap((c) => c.evidence);
+  const verifierIds = consulted.flatMap((c) => c.used);
 
   // The request names a different account than the merchant will actually be paid to.
   if (extraction?.payeeAccount && extraction.payeeAccount !== challenge.payTo)
@@ -127,7 +187,7 @@ async function gather(
       level: "high",
       detail: `request names ${extraction.payeeAccount} but payment goes to ${challenge.payTo}`,
     });
-  return evidence;
+  return { evidence, verifierIds };
 }
 
 export async function runCheck(
@@ -181,7 +241,11 @@ export async function runCheck(
   }
 
   // 3. Paid evidence, then the verdict.
-  const evidence = await gather(deps, extracted?.value ?? null, challenge);
+  const { evidence, verifierIds } = await gather(
+    deps,
+    extracted?.value ?? null,
+    challenge,
+  );
   let verdict: RiskVerdict | null = null;
   if (extracted) {
     try {
@@ -208,7 +272,12 @@ export async function runCheck(
       decision,
       status: "verdict",
     })) ?? check;
-  await audit("check.verdict", { verdictHash, zgRequestIds: requestIds });
+  await audit("check.verdict", {
+    verdictHash,
+    // An audit message must fit one HCS message; an oversized id must not cost us the record.
+    zgRequestIds: requestIds.map((id) => id.slice(0, 64)),
+    verifiers: verifierIds,
+  });
   await audit("check.decision", { decision: decision.kind });
 
   // 5. Act on it.

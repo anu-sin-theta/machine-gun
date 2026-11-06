@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { checkLink, linkQuerySchema } from "@/adapters/x402/checkers";
 import { paidRoute } from "@/adapters/x402/server";
+import { BUILT_IN_PRICES } from "@/marketplace/builtins";
 
-/** 0.05 HBAR in tinybars. */
-const PRICE = 5_000_000n;
+const PRICE = BUILT_IN_PRICES.linkIntel;
 
 export const GET = paidRoute(
   async (req) => {

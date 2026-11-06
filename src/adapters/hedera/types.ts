@@ -29,18 +29,20 @@ export const AUDIT_EVENT_TYPES = [
 export const auditEventSchema = z.object({
   v: z.literal(1),
   type: z.enum(AUDIT_EVENT_TYPES),
-  checkId: z.string().min(1).max(64),
+  checkId: z.string().min(1).max(48),
   /** Epoch ms. */
   at: z.number().int().nonnegative(),
   verdictHash: hex64.optional(),
   actionHash: hex64.optional(),
   decision: z.enum(["auto-pay", "step-up", "block"]).optional(),
   /** 0G request ids behind the verdict, for later verification. */
-  zgRequestIds: z.array(z.string().max(80)).max(4).optional(),
+  zgRequestIds: z.array(z.string().max(64)).max(4).optional(),
+  /** Evidence names of the verifiers that answered, so evidence can be traced to who sold it. */
+  verifiers: z.array(z.string().max(30)).max(6).optional(),
   /** Hedera transaction id of the settlement. */
   txId: z.string().max(80).optional(),
   /** Short machine reason, e.g. "ACTION_CHANGED". */
-  detail: z.string().max(120).optional(),
+  detail: z.string().max(100).optional(),
 });
 export type AuditEvent = z.infer<typeof auditEventSchema>;
 

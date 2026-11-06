@@ -15,6 +15,12 @@ import type {
   PendingApproval,
   RiskVerdict,
 } from "@/core";
+import type {
+  AgentFilter,
+  AgentListing,
+  AgentStatus,
+} from "@/marketplace/types";
+import type { AccountRecord, TaskPatch, TaskRecord } from "@/tasks/types";
 
 export type CheckStatus =
   | "received"
@@ -79,7 +85,36 @@ export interface NoncesRepo {
   markUsed(nonce: string, now: number): Promise<boolean>;
 }
 
+export interface AgentsRepo {
+  /** True if inserted; false if the id or the evidence name is already taken. */
+  create(listing: AgentListing): Promise<boolean>;
+  get(id: string): Promise<AgentListing | null>;
+  /** Oldest first, then by id, so the order is stable. */
+  list(filter?: AgentFilter): Promise<AgentListing[]>;
+  /** False if there is no such agent. */
+  setStatus(id: string, status: AgentStatus): Promise<boolean>;
+}
+
+export interface AccountsRepo {
+  /** False if the id or token hash is taken. */
+  create(account: AccountRecord): Promise<boolean>;
+  get(id: string): Promise<AccountRecord | null>;
+  getByTokenHash(tokenHash: string): Promise<AccountRecord | null>;
+}
+
+export interface TasksRepo {
+  create(task: TaskRecord): Promise<void>;
+  get(id: string): Promise<TaskRecord | null>;
+  getByCheckId(checkId: string): Promise<TaskRecord | null>;
+  /** Newest first. */
+  listByAccount(accountId: string, limit: number): Promise<TaskRecord[]>;
+  update(id: string, patch: TaskPatch): Promise<TaskRecord | null>;
+}
+
 export interface Repositories {
+  agents: AgentsRepo;
+  accounts: AccountsRepo;
+  tasks: TasksRepo;
   checks: ChecksRepo;
   approvals: ApprovalsRepo;
   spend: SpendLedgerRepo;

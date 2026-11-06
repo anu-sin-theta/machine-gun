@@ -3,7 +3,10 @@ import { getRepositories } from "@/adapters/db";
 import { DEMO_MERCHANTS, getDemoAudit } from "@/agent";
 import { CheckForm } from "@/components/check-form";
 import { CheckResult } from "@/components/check-result";
+import { VerifierNetwork } from "@/components/verifier-network";
 import { getConfig } from "@/config/env";
+import { getDirectory } from "@/marketplace";
+import { type PublicAgent, toPublic } from "@/marketplace/public";
 import { safeReasonCode } from "@/ui/explain";
 import { toView } from "@/ui/view";
 
@@ -50,6 +53,18 @@ async function Dashboard({
   const config = getConfig();
   const demo = config.agentMode === "demo";
   const simulated = config.world.mode === "simulated";
+
+  // The registry the agent buys evidence from. The page still works if it cannot be read.
+  let verifiers: PublicAgent[] = [];
+  let registryAvailable = true;
+  try {
+    verifiers = (
+      await getDirectory().all({ role: "verifier", status: "active" })
+    ).map(toPublic);
+  } catch (error) {
+    console.error("registry unavailable", error);
+    registryAvailable = false;
+  }
 
   // Returning from World ID: show where that check ended up.
   const checkId = one(params.check);
@@ -115,6 +130,8 @@ async function Dashboard({
             : null
         }
       />
+
+      <VerifierNetwork agents={verifiers} available={registryAvailable} />
     </div>
   );
 }

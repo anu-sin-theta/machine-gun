@@ -64,15 +64,37 @@ describe("encoding", () => {
   it("keeps the largest valid event under the HCS limit", () => {
     const largest: AuditEvent = {
       ...EVENT,
-      checkId: "c".repeat(64),
+      checkId: "c".repeat(48),
       actionHash: HASH,
       txId: "t".repeat(80),
-      detail: "d".repeat(120),
-      zgRequestIds: Array.from({ length: 4 }, () => "r".repeat(80)),
+      detail: "d".repeat(100),
+      zgRequestIds: Array.from({ length: 4 }, () => "r".repeat(64)),
+      verifiers: Array.from({ length: 6 }, () => "v".repeat(30)),
     };
     expect(encodeAuditEvent(largest).bytes.length).toBeLessThan(
       MAX_MESSAGE_BYTES,
     );
+  });
+
+  it("records which verifiers answered, within bounds", () => {
+    const withVerifiers = {
+      ...EVENT,
+      verifiers: ["link-intel", "acme-links"],
+    };
+    const decoded = JSON.parse(
+      new TextDecoder().decode(encodeAuditEvent(withVerifiers).bytes),
+    );
+    expect(decoded.verifiers).toEqual(["link-intel", "acme-links"]);
+    expect(() => encodeAuditEvent({ ...EVENT, verifiers: [] })).not.toThrow();
+    expect(() =>
+      encodeAuditEvent({
+        ...EVENT,
+        verifiers: Array.from({ length: 7 }, () => "v"),
+      }),
+    ).toThrow(HederaError);
+    expect(() =>
+      encodeAuditEvent({ ...EVENT, verifiers: ["v".repeat(31)] }),
+    ).toThrow(HederaError);
   });
 
   it("round-trips reputation reports and ignores junk payloads", () => {

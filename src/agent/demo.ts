@@ -15,16 +15,18 @@ import type { AuditEvent, ReputationReport } from "@/adapters/hedera";
 import { reputationEvidence } from "@/adapters/hedera";
 import { checkLink } from "@/adapters/x402/checkers";
 import type { Extraction, ZeroG } from "@/adapters/zerog";
+import { DEMO_PAYEE } from "@/marketplace/builtins";
+import { domainHeuristics } from "@/marketplace/heuristics";
 import {
   type AgentDeps,
   AgentError,
   type Challenge,
-  type Checkers,
   type MerchantPayer,
   type ResourceProbe,
+  type VerifierNetwork,
 } from "./types";
 
-export const DEMO_PAYEE = "0.0.5001";
+export { DEMO_PAYEE };
 
 /** Pretend merchants. The price is what their 402 challenge would say. */
 export const DEMO_MERCHANTS: Record<string, { label: string; amount: bigint }> =
@@ -140,15 +142,41 @@ const demoZeroG = (): ZeroG => ({
 
 // --- the stand-ins for x402 and Hedera ---------------------------------------
 
-const demoCheckers = (): Checkers => ({
-  // Real analysis: the same Rust engine the paid checker endpoint runs.
-  async link(url) {
-    return checkLink(url).evidence;
-  },
-  async reputation(payee) {
-    return reputationEvidence(payee, state().reports);
-  },
-});
+/**
+ * Runs a listed verifier's check locally instead of paying its endpoint. The
+ * analysis is the real code (the same Rust link engine, the same heuristics,
+ * the same reputation scoring); only the x402 payment is skipped. Evidence is
+ * labelled with the listing's name, exactly as in live mode.
+ */
+const demoCallVerifier: VerifierNetwork["call"] = async (listing, subject) => {
+  switch (listing.evidenceSource) {
+    case "link-intel":
+      if (subject.kind === "link")
+        return {
+          ...checkLink(subject.url).evidence,
+          source: listing.evidenceSource,
+        };
+      break;
+    case "domain-heuristics":
+      if (subject.kind === "link")
+        return {
+          ...domainHeuristics(subject.url),
+          source: listing.evidenceSource,
+        };
+      break;
+    case "reputation":
+      if (subject.kind === "payee")
+        return {
+          ...reputationEvidence(subject.account, state().reports),
+          source: listing.evidenceSource,
+        };
+      break;
+  }
+  throw new AgentError(
+    "VERIFIER_REJECTED",
+    `no local stand-in for ${listing.id} on ${subject.kind} checks`,
+  );
+};
 
 function demoProbe(origins: readonly string[]): ResourceProbe {
   const allowed = new Set(origins);
@@ -203,12 +231,15 @@ const demoLogs = (): NonNullable<AgentDeps["logs"]> => ({
 });
 
 /** The ports for demo mode. The caller adds repos, approval, policy, clock and randomness. */
-export function createDemoPorts(
-  merchantOrigins: readonly string[],
-): Pick<AgentDeps, "zerog" | "checkers" | "probe" | "payer" | "logs"> {
+export function createDemoPorts(merchantOrigins: readonly string[]): Pick<
+  AgentDeps,
+  "zerog" | "probe" | "payer" | "logs"
+> & {
+  callVerifier: VerifierNetwork["call"];
+} {
   return {
     zerog: demoZeroG(),
-    checkers: demoCheckers(),
+    callVerifier: demoCallVerifier,
     probe: demoProbe(merchantOrigins),
     payer: demoPayer(),
     logs: demoLogs(),

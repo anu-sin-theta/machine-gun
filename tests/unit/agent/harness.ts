@@ -6,6 +6,8 @@ import { createWorldOidc } from "@/adapters/world";
 import type { Evidence, Extraction, ZeroG } from "@/adapters/zerog";
 import type { AgentDeps, AgentError, Challenge, CheckInput } from "@/agent";
 import { hbar, parsePolicyConfig, type RiskVerdict } from "@/core";
+import { builtInListings } from "@/marketplace/builtins";
+import type { AgentListing } from "@/marketplace/types";
 import {
   CLIENT_ID,
   CLIENT_SECRET,
@@ -40,15 +42,26 @@ export interface Script {
   challenge?: Challenge | AgentError;
   extraction?: Extraction | Error;
   verdict?: RiskVerdict | Error;
+  /** What the "reputation" verifier answers. */
   reputation?: Evidence | Error;
+  /** What the "link-intel" verifier answers. */
   link?: Evidence | Error;
+  /** Replaces the registry's answer to `list`: other verifiers, none, or a failing directory. */
+  listings?: AgentListing[] | Error;
+  /** What a specific verifier id answers (checked before the two above). */
+  byId?: Record<string, Evidence | Error>;
   pay?: { transactionId?: string } | Error;
   /** Throw from the audit/reputation log. */
   logFails?: boolean;
   noLogs?: boolean;
 }
 
-const LOW: Evidence = { source: "x", level: "low", detail: "ok" };
+/** The built-in verifiers the pipeline tests run against (two of the three; link has one here). */
+export const LISTINGS = builtInListings({
+  baseUrl: "http://localhost:3000",
+  payTo: PAYEE,
+  now: 0,
+}).filter((l) => l.evidenceSource !== "domain-heuristics");
 
 export async function makeHarness(script: Script = {}) {
   const calls = {
@@ -56,6 +69,9 @@ export async function makeHarness(script: Script = {}) {
     judge: [] as Array<readonly Evidence[]>,
     link: [] as string[],
     reputation: [] as string[],
+    /** Ids of every verifier the pipeline paid, in order. */
+    called: [] as string[],
+    listed: [] as string[],
     pay: [] as Array<{ resourceUrl: string; challenge: Challenge }>,
     audit: [] as AuditEvent[],
     reports: [] as ReputationReport[],
@@ -104,14 +120,30 @@ export async function makeHarness(script: Script = {}) {
   const deps: AgentDeps = {
     repos,
     zerog,
-    checkers: {
-      async link(url) {
-        calls.link.push(url);
-        return orThrow(script.link ?? LOW);
+    verifiers: {
+      async list(kind) {
+        calls.listed.push(kind);
+        const all = orThrow(script.listings ?? LISTINGS);
+        return all.filter((l) => l.input === kind);
       },
-      async reputation(payee) {
-        calls.reputation.push(payee);
-        return orThrow(script.reputation ?? LOW);
+      async call(verifier, subject) {
+        calls.called.push(verifier.id);
+        if (subject.kind === "link") calls.link.push(subject.url);
+        else calls.reputation.push(subject.account);
+        const scripted =
+          script.byId?.[verifier.id] ??
+          (verifier.evidenceSource === "reputation"
+            ? script.reputation
+            : verifier.evidenceSource === "link-intel"
+              ? script.link
+              : undefined);
+        return orThrow(
+          scripted ?? {
+            source: verifier.evidenceSource,
+            level: "low" as const,
+            detail: "ok",
+          },
+        );
       },
     },
     probe: {

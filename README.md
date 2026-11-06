@@ -26,10 +26,12 @@ In this mode three things are **labelled stand-ins**, and the page says so: the 
 | World ID flow (PKCE, state, nonce, `acr`, fresh `auth_time`, single use) | **Verified** end to end against a built-in OIDC issuer using the same code path as the real one; World's real discovery document is accepted (live test) |
 | Postgres adapter and migration | **Verified** against a real Postgres engine (PGlite). Not yet run on Neon itself |
 | x402 server | **Partly verified live.** A real request returned a correct HBAR payment challenge, with the fee payer from the Blocky402 testnet facilitator. **No payment has been settled** |
-| Browser behaviour | **Verified.** 13 Playwright tests on the production build |
+| Agent registry and verifier directory | **Verified** with fakes and on real Postgres (PGlite): listing rules, endpoint safety, selection, per-verifier payment guard. Only the three built-in verifiers exist; other agents can ask to be listed (proof of control, then an operator activates), merchants can come from the registry, a third party's lone `high` counts as `medium`, and endpoints are fetched through an address-checking fetch; **none of it has touched Hedera or a real DNS attacker** (see [docs/MARKETPLACE.md](docs/MARKETPLACE.md)) |
+| Task marketplace (workers, accounts, tasks, agent card) | **Verified** with fakes, on real Postgres (PGlite) and over HTTP against the production build in demo mode. **No task has paid a worker on Hedera yet**; the built-in worker is rules, not a model (see [docs/TASKS.md](docs/TASKS.md)) |
+| Browser behaviour | **Verified.** 17 Playwright tests on the production build |
 | 0G calls, Hedera writes (HCS), x402 settlement, a real World login, Neon, Vercel | **Not yet verified live.** Written and unit-tested; they need credentials. The live tests exist and skip with a reason until you add them (`pnpm test:live`) |
 
-Counts at the time of writing: 394 JavaScript tests (26 files), 80 Rust tests, 13 browser tests.
+Counts at the time of writing: 634 JavaScript tests (33 files), 80 Rust tests, 17 browser tests.
 
 ## How it decides
 
@@ -37,7 +39,7 @@ Counts at the time of writing: 394 JavaScript tests (26 files), 80 Rust tests, 1
  request + merchant URL
    1. merchant's own 402 challenge  -> who gets paid, how much   (the text is never trusted for this)
    2. 0G (private mode)             -> payee, link, pressure tactics
-   3. checkers paid over x402       -> link analysis, payee reputation   (per-call spend guard)
+   3. registered verifiers over x402 -> link analysis (two), payee reputation   (per-verifier spend guard)
    4. 0G                            -> risk verdict; evidence can raise it, never lower it
    5. Rust policy                   -> auto-pay | step-up(tier) | block
    6. World ID                      -> approval tied to the exact payment; stronger tier for higher risk
@@ -103,6 +105,8 @@ src/
   core/          TypeScript reference implementation of the same logic (the executable spec)
   rust/          Typed bridge to the WASM, plus generated pkg/ (committed)
   adapters/      db (Postgres/Neon, memory), zerog, hedera (HCS, mirror), x402, world (OIDC, simulator)
+  marketplace/   Agent registry: listings, endpoint safety, verifier directory, onboarding, built-in verifiers and demo worker
+  tasks/         Accounts, task flow (a task payment is a Kavach402 check), worker ports, answer screening, agent card
   agent/         The loop (pipeline.ts), x402-backed ports, demo mode
   ops/           Readiness checklist behind /api/status
   ui/            Plain-language wording and the view model
@@ -132,6 +136,8 @@ Next.js 16 and React 19 (Node runtime), TypeScript strict, Rust 1.99 compiled to
 
 - [docs/DEMO.md](docs/DEMO.md): a 3-minute walkthrough and a live-demo checklist
 - [docs/TRACKS.md](docs/TRACKS.md): what we built for each sponsor track, where it is in the code, and how to check it
+- [docs/TASKS.md](docs/TASKS.md): agents hiring agents: list a worker (OpenAI-compatible endpoint), get an account token, propose a task, watch its progress; every task payment goes through the firewall
+- [docs/MARKETPLACE.md](docs/MARKETPLACE.md): the agent registry, what a verifier agent must build to be listed, and what is not built yet
 - [docs/DEPLOY.md](docs/DEPLOY.md): Vercel and Neon, environment variables, preflight, limits
 - [HOW_IT_WORKS.md](HOW_IT_WORKS.md): the flow, the policy table, the binding rules, link signals, the WASM boundary
 - [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md): notes for the World team from building against the OIDC issuer

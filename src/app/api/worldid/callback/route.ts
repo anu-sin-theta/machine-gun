@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRepositories } from "@/adapters/db";
 import {
   completeApproval,
   getApprovalDeps,
@@ -6,6 +7,7 @@ import {
 } from "@/adapters/world";
 import { getAgentDeps, handleApprovalOutcome } from "@/agent";
 import { getConfig } from "@/config/env";
+import { getTaskDeps, resumeTask } from "@/tasks";
 
 /** Settling an approved payment happens in this request: allow more than the platform default. */
 export const maxDuration = 60;
@@ -28,7 +30,11 @@ export async function GET(req: Request) {
   let status: string = outcome.kind;
   let reason: string | undefined = outcome.reason;
   try {
-    const result = await handleApprovalOutcome(getAgentDeps(), outcome);
+    // A check that pays a worker continues as that task; any other as a plain payment.
+    const task = await getRepositories().tasks.getByCheckId(outcome.checkId);
+    const result = task
+      ? await resumeTask(getTaskDeps(), task, outcome)
+      : await handleApprovalOutcome(getAgentDeps(), outcome);
     if (result) {
       status = result.status;
       reason = result.reason ?? reason;
