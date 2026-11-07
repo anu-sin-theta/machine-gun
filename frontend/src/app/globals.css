@@ -22,6 +22,25 @@ body {
   font-family: var(--font-bricolage), system-ui, sans-serif;
 }
 
+.font-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+:focus-visible {
+  outline: 3px solid #17140d;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 .font-body {
   font-family: var(--font-dm-sans), system-ui, sans-serif;
 }
@@ -94,8 +113,8 @@ body {
   position: absolute;
   left: -6px;
   right: -6px;
-  bottom: 4px;
-  height: 26px;
+  bottom: -0.06em;
+  height: 0.3em;
   background-color: #ffc531;
   border: 2px solid #17140d;
   transform: rotate(-1.5deg);
@@ -108,8 +127,8 @@ body {
   position: absolute;
   left: -6px;
   right: -6px;
-  bottom: 4px;
-  height: 26px;
+  bottom: -0.06em;
+  height: 0.3em;
   background-color: #12b3a4;
   border: 2px solid #17140d;
   transform: rotate(1.2deg);
