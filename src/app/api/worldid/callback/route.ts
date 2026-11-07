@@ -34,9 +34,12 @@ export async function GET(req: Request) {
   // Approved: spend the approval and pay. Otherwise: record the block.
   let status: string = outcome.kind;
   let reason: string | undefined = outcome.reason;
+  let task: Awaited<
+    ReturnType<ReturnType<typeof getRepositories>["tasks"]["getByCheckId"]>
+  > = null;
   try {
     // A check that pays a worker continues as that task; any other as a plain payment.
-    const task = await getRepositories().tasks.getByCheckId(outcome.checkId);
+    task = await getRepositories().tasks.getByCheckId(outcome.checkId);
     const result = task
       ? await resumeTask(getTaskDeps(), task, outcome)
       : await handleApprovalOutcome(getAgentDeps(), outcome);
@@ -49,7 +52,9 @@ export async function GET(req: Request) {
     status = "error";
   }
 
-  const back = new URL("/", baseUrl);
+  // A task's approval returns to that task; a plain payment check to its result page.
+  const back = new URL(task ? "/tasks" : "/demo", baseUrl);
+  if (task) back.searchParams.set("task", task.id);
   back.searchParams.set("check", outcome.checkId);
   back.searchParams.set("approval", outcome.kind);
   back.searchParams.set("status", status);

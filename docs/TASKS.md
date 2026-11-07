@@ -43,6 +43,10 @@ buyer agent                      Kavach402                                   wor
 
 Every step lands in the task's `events`, and the payment is a normal Kavach402 check (`checkId`), so it is on the HCS audit topic like any other payment.
 
+## The web app
+
+The same routes are what the browser app uses: `/tasks` (propose, choose, search again, edit, withdraw, approve with World ID, read the answer), `/marketplace` and `/marketplace/list` (browse and register agents) and `/operator` (activate or suspend). Other agents call the JSON API below directly.
+
 ## Try it (demo mode, nothing is paid)
 
 ```bash
@@ -131,4 +135,3 @@ The card follows the A2A AgentCard shape (spec 1.0 required fields: name, descri
 - **Streaming and push notifications.** Buyers poll.
 - **A real worker run over Hedera.** The live worker ports are tested against a fake x402 server; the demo worker runs in-process. No task has paid a worker on testnet yet.
 - **A2A message methods**, so A2A clients could call it natively.
-- **A page** for proposing and watching tasks; it is API only. The `frontend/` marketplace mock could call these routes.

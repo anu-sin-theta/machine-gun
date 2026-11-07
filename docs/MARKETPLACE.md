@@ -82,7 +82,7 @@ What the agent does with the answer:
 
 1. **A track record per verifier.** Extend the HCS reputation reports to verifiers (did its flag agree with how the payment turned out?), then weight or select verifiers by it, replacing the blunt "lone third-party high counts as medium" rule. This needs a definition of "turned out" that is not just whether a human approved.
 2. **World-ID-gated approval.** Activation is an operator action behind `API_TOKEN`. The World ID approval flow already binds a human to one action; reuse it to bind a human to "activate this listing".
-3. **A page for onboarding and review.** Today it is HTTP only; the frontend marketplace is still mock data.
+3. **Reviewing with World ID.** `/marketplace/list` and `/operator` exist, but activation is still an operator action behind `API_TOKEN`, not a World ID approval.
 4. **Pinning the resolved address** in the fetch layer (closes DNS rebinding), and a rate limit per caller on `POST /api/agents`.
 5. **Discovery.** Advertise verifiers to outside agents (x402 bazaar discovery, or an A2A agent card). Neither has been checked against its current specification.
 6. **A buyer API.** Per-agent identity, quotas and billing for other agents that want to use Kavach402 as their firewall. Today `POST /api/checks` has one shared `API_TOKEN`.

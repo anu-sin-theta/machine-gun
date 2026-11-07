@@ -67,7 +67,7 @@ The differential tests were mutation-checked: deliberately breaking the TS hard-
 - **Never run live:** 0G calls, HCS writes, x402 settlement, a real World login, Neon over HTTP, a Vercel deploy. Each has a live test or a preflight (`pnpm test:live`, `GET /api/status`) that skips or reports until credentials exist.
 - **Nothing is committed.** The folder is not a git repository (`.gitattributes` is in place for LF line endings). CI has never run on GitHub, so the `build:wasm:check` step (byte-identical rebuild on Linux) is unverified: the committed WASM was rebuilt on Windows with the GNU toolchain. If it fails on first run, rebuild in a CI-like environment and commit; the cause is a toolchain or path difference, not a logic bug.
 - Link intel has **no TypeScript oracle** (it is new code), so it is covered by Rust unit and property tests and bridge smoke tests only. The default brand list is a starting point and needs curation.
-- A `frontend/` folder (a separate animated Next app, port 3001) appeared during the build and was not written or checked as part of it. It is excluded from root lint and typecheck.
+- The web app was once a separate `frontend/` project; it is now merged into this app (see "One app" below).
 
 ## Piece 3 notes
 
@@ -174,7 +174,17 @@ The project was a one-agent payment firewall; this is the first step toward an a
 - **Bug caught by a test during this work:** adding `verifiers` to the audit event made the largest valid event ~1,090 bytes, over Hedera's 1,024-byte message limit (a valid event that could not be submitted). Fixed by recording the short evidence name instead of the id and tightening the other bounds (checkId 48, request ids 64, detail 100); a test pins the worst case under the limit. Oversized 0G request ids are truncated before auditing, because audit failures are swallowed by design.
 - **Onboarding (added after the registry):** `src/marketplace/onboard.ts` (`registerAgent`, `proveControl`, `activateAgent`, `suspendAgent`), `POST /api/agents` (public, creates `suspended` after the endpoint's unpaid 402 names the listed payee/network/asset at no more than the listed price; 25 pending max), `POST /api/agents/[id]/status` (operator, needs `API_TOKEN`; activation re-proves control). Merchants: `registeredMerchantOrigins` in `createX402Agent` lets live mode probe and pay origins of active merchant listings. Trust: `src/marketplace/trust.ts` counts a third party's lone `high` as `medium` (pipeline `consult`). Address check: `src/marketplace/network.ts` (`createSafeFetch`) resolves and refuses non-public addresses, no redirects; checked, not pinned.
 - **Not built:** per-verifier track record, World-ID-gated activation (it is `API_TOKEN` today), an onboarding page, address pinning and per-caller rate limits, discovery (x402 bazaar / A2A card), a buyer API with per-agent identity. `tests/live/verifier.live.test.ts` is the unrun live check for paying a verifier. All in docs/MARKETPLACE.md in build order.
-- **Note:** a separate `frontend/` app with a marketplace mock appeared in the folder; it still uses static data (`frontend/src/data/marketplace.ts`). `GET /api/agents` is what it would call. I did not edit it.
+- **Note:** the web app (pages) is built on these routes; see "One app" below.
+
+## One app (web pages merged into the backend)
+
+The web app that lived in `frontend/` is now part of this Next.js app, so there is one project, one port and one deploy.
+
+- **Pages** (`src/app`): `/` landing with the live registry, `/marketplace`, `/marketplace/list`, `/tasks`, `/check`, `/operator`, `/how-it-works`. The original single-page demo moved to `/demo`; plain-payment approvals return there, task approvals return to `/tasks?task=<id>`.
+- **Code:** `src/components` (`ui.tsx` kit, `status.tsx`, `site/`, `marketplace/`, `tasks/`, `check/`, `operator/`, `landing/`), `src/lib` (`api.ts` typed client, `format.ts`, `useAccount.ts`, `useOperatorToken.ts`). One stylesheet (`src/app/globals.css`): the classic demo's tokens are mapped onto the same cream palette.
+- **Config:** `next.config.ts` allows this machine's LAN addresses on the dev server (`allowedDevOrigins`, plus `DEV_ORIGINS`). The payment check reads the app's own base URL at request time.
+- **Tests:** `e2e/app.spec.ts` drives the UI in a browser (landing, marketplace, tasks console incl. the World ID round trip, payment check); `e2e/demo.spec.ts` covers `/demo`.
+- **Bug found by a property test during the merge:** link analysis flagged `npi.sbi.co.in` as imitating NPCI (one letter off) even though the host is SBI's own. Hosts on any brand's real domain are now never treated as imitations of another brand (`rust/kavach-core/src/linkintel.rs`, regression test added, WASM rebuilt).
 
 ## Task marketplace (added after onboarding)
 

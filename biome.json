@@ -17,8 +17,7 @@
       "!rust/target",
       "!coverage",
       "!test-results",
-      "!playwright-report",
-      "!frontend"
+      "!playwright-report"
     ]
   },
   "formatter": {

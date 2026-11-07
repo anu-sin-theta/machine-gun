@@ -155,22 +155,19 @@ The full list and the order to fix them are in [docs/MARKETPLACE.md](docs/MARKET
 ## Try it
 
 ### One minute, no keys (demo mode)
-1. Install and start the backend:
-   ```bash
-   pnpm install
-   AGENT_MODE=demo WORLD_MODE=simulated pnpm dev
-   ```
-2. Start the web app:
-   ```bash
-   cd frontend && pnpm install && pnpm dev
-   ```
-3. Open http://localhost:3001:
-   - **Marketplace:** browse the agents.
-   - **Tasks:** create an account, propose a task, choose a worker, read the answer.
-   - **Payment check:** five example requests cover every decision.
-   - **Operator:** approve new listings.
-
-The original single-page demo is still at http://localhost:3000 (3-minute script: [docs/DEMO.md](docs/DEMO.md)).
+One app serves the pages and the API, on one port:
+```bash
+pnpm install
+AGENT_MODE=demo WORLD_MODE=simulated pnpm dev
+```
+Open http://localhost:3000:
+- **/**: what it is, with the live registry.
+- **/marketplace**: browse and filter the agents; **/marketplace/list** registers one.
+- **/tasks**: create an account, propose a task, choose a worker, read the answer.
+- **/check**: the payment firewall on its own; five example requests cover every decision.
+- **/operator**: approve new listings (needs `API_TOKEN`).
+- **/how-it-works**: roles, statuses and the API.
+- **/demo**: the original single-page demo (3-minute script: [docs/DEMO.md](docs/DEMO.md)).
 
 In demo mode three things are labelled stand-ins: the 0G model (a keyword heuristic), payments (no HBAR moves; third-party agents are called with a `demo-unsettled` marker after their real 402 is checked) and World ID (a simulator with Orb / Orb + face buttons). Everything else is the real code.
 
@@ -205,7 +202,7 @@ Leave `AGENT_MODE` unset, fill in the Hedera accounts, 0G key and (later) World 
    LIVE_BASE_URL=http://localhost:3000 pnpm test:live
    ```
 
-**Deploying:** the backend and the web app go to Vercel as two projects (root and `frontend/`), with Neon for storage; the example agents run on any Node host or as a container (`examples/gemini-agents/Dockerfile`). The step-by-step recipe, including onboarding the agents into the deployed backend, is in [docs/DEPLOY.md](docs/DEPLOY.md).
+**Deploying:** the whole app (pages and API) is one Vercel project, with Neon for storage; the example agents run on any Node host or as a container (`examples/gemini-agents/Dockerfile`). The step-by-step recipe, including onboarding the agents into the deployed backend, is in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ---
 
@@ -218,7 +215,7 @@ Leave `AGENT_MODE` unset, fill in the Hedera accounts, 0G key and (later) World 
 | Agent registry, onboarding, verifier trust rule, address-checked fetching | **Verified** with fakes and on real Postgres (PGlite) |
 | Task marketplace (accounts, suggestions, accept / research / edit / withdraw, approval, answer screening, agent card) | **Verified** with fakes, on real Postgres, over HTTP against the production build, and by hand in the browser with locally run third-party agents |
 | World ID flow (PKCE, state, nonce, `acr`, fresh `auth_time`, single use) | **Verified** end to end against a built-in OIDC issuer using the same code path as the real one |
-| Web app (`frontend/`) | **Run by hand in the browser** against the backend for every page and flow; typecheck and production build pass. No automated frontend tests yet |
+| Web app (pages in `src/app`, components in `src/components`) | **Verified** in a real browser against the production build: landing and registry, marketplace filters, the tasks console (propose, choose, run, edit, search again, withdraw), the World ID round trip back to the task, and the payment check (Playwright) |
 | Postgres adapter and migrations | **Verified** on PGlite; not yet run on Neon itself |
 | x402 server | **Partly verified live**: a real request returned a correct HBAR challenge from the Blocky402 testnet facilitator. **No payment has been settled** |
 | 0G calls, HCS writes, x402 settlement, a real World login, Neon, Vercel | **Not yet verified live.** Written and unit-tested; they need credentials. `pnpm test:live` skips each with a reason until they are set |
@@ -290,9 +287,9 @@ src/
   marketplace/   Registry, onboarding and proof of control, endpoint safety, verifier directory and trust, built-ins
   tasks/         Accounts, the task flow (a task payment is a Kavach402 check), worker ports, answer screening, agent card
   ops/           Readiness checklist behind /api/status
-  app/           API routes and the original single-page demo
-frontend/        The web app (Next.js, port 3001): marketplace, tasks console, payment check, operator, how it works.
-                 Proxies /api to the backend. Own package.json; excluded from the root lint
+  app/           Pages (landing, marketplace, tasks, check, operator, how it works), the classic /demo page and the API routes
+  components/    The web app's UI kit and screens (site shell, marketplace, tasks console, payment check, operator)
+  lib/           Typed API client, exact HBAR/tinybar formatting, stored tokens
 examples/
   gemini-agents/ Example third-party agents (Gemini workers, a Gemini verifier, two bad test agents)
 e2e/             Playwright tests (demo + simulated mode)
@@ -319,6 +316,5 @@ Next.js 16 and React 19, TypeScript strict, Rust 1.99 compiled to WebAssembly, D
 - [docs/DEPLOY.md](docs/DEPLOY.md): Vercel and Neon, environment variables, preflight, limits
 - [docs/TRACKS.md](docs/TRACKS.md): what we built for each sponsor track and where it is in the code
 - [HOW_IT_WORKS.md](HOW_IT_WORKS.md): the flow, the policy table, the binding rules, link signals, the WASM boundary
-- [frontend/README.md](frontend/README.md): the web app's pages and how it talks to the backend
 - [HANDOFF.md](HANDOFF.md): current state, open questions, bugs found, decisions, change log
 - [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md): notes for the World team

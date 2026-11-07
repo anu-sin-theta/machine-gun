@@ -11,9 +11,8 @@ Everything runs in **demo mode**: no HBAR moves and World ID is a simulator. The
 
 | Terminal | What | Port |
 |---|---|---|
-| A | Kavach402 backend (demo mode, with an operator token) | 3000 |
+| A | Kavach402: the web app and the API in one (demo mode, with an operator token) | 3000 |
 | B | Your example agents: 3 Gemini workers, 1 Gemini verifier, 2 test agents | 4101–4106 |
-| C | The web app | 3001 |
 
 The example agents (`examples/gemini-agents/agents.mjs`):
 
@@ -30,12 +29,9 @@ Each agent answers an unpaid request with a real x402 `402` (exact scheme, HBAR,
 
 ## 2. Setup (once)
 
-1. Install dependencies in the repository and the web app:
+1. Install dependencies:
    ```bash
    pnpm install
-   ```
-   ```bash
-   cd frontend && pnpm install
    ```
 2. Add your Gemini key to `machine-gun/.env` (get one at https://aistudio.google.com/apikey):
    ```
@@ -44,7 +40,7 @@ Each agent answers an unpaid request with a real x402 `402` (exact scheme, HBAR,
    ```
    No key yet? Every step still works with `--offline`: the agents answer with clearly labelled stand-in text instead of calling Gemini.
 
-3. **Terminal A: the backend.** Demo mode, simulated World ID, and an operator token (16+ characters) so you can approve listings. Git Bash:
+3. **Terminal A: the app** (pages and API on one port). Demo mode, simulated World ID, and an operator token (16+ characters) so you can approve listings. Git Bash:
    ```bash
    AGENT_MODE=demo WORLD_MODE=simulated API_TOKEN=kavach-operator-local-0001 pnpm dev
    ```
@@ -52,7 +48,7 @@ Each agent answers an unpaid request with a real x402 `402` (exact scheme, HBAR,
    ```powershell
    $env:AGENT_MODE="demo"; $env:WORLD_MODE="simulated"; $env:API_TOKEN="kavach-operator-local-0001"; pnpm dev
    ```
-   Wait for `Ready`. Check: http://localhost:3000/api/health shows `"ok":true`.
+   Wait for `Ready`. Check: http://localhost:3000/api/health shows `"ok":true`, and http://localhost:3000 shows the home page.
 
 4. **Terminal B: your agents.**
    ```bash
@@ -60,13 +56,7 @@ Each agent answers an unpaid request with a real x402 `402` (exact scheme, HBAR,
    ```
    (or `pnpm agents:gemini -- --offline`). You should see six lines, one per agent and port.
 
-5. **Terminal C: the web app.**
-   ```bash
-   cd frontend && pnpm dev
-   ```
-   Open http://localhost:3001. The header should say **Backend online**.
-
-> The backend keeps everything in memory unless `DATABASE_URL` is set. Restarting terminal A forgets registrations, accounts and tasks: just run the steps again.
+> The app keeps everything in memory unless `DATABASE_URL` is set. Restarting terminal A forgets registrations, accounts and tasks: just run the steps again.
 
 ## 3. Automatic: let the script do everything
 
@@ -94,13 +84,13 @@ What it does, and what you should see:
 | 10 | A task full of pressure words | `awaiting-approval` with an approval link |
 | 11 | Lists your tasks | All five with their final status |
 
-At the end it prints the requester token. Paste it into http://localhost:3001/tasks → **Already have a token?** to see the same tasks in the web app, and open the step 10 link to approve it (section 4, step 9).
+At the end it prints the requester token. Paste it into http://localhost:3000/tasks → **Already have a token?** to see the same tasks in the web app, and open the step 10 link to approve it (section 4, step 9).
 
 ## 4. By hand in the web app
 
 ### Step 1: Onboard your agents (as an agent developer)
 
-Go to http://localhost:3001/marketplace/list and register each agent. For **Gemini Summarizer**:
+Go to http://localhost:3000/marketplace/list and register each agent. For **Gemini Summarizer**:
 
 | Field | Value |
 |---|---|
@@ -135,15 +125,15 @@ The others:
 
 ### Step 2: Approve them (as the operator)
 
-Go to http://localhost:3001/operator, enter the token `kavach-operator-local-0001`, and press **Activate** next to each agent under *Waiting for review*. Expected: "… is active: control proven again". Activation re-checks the endpoint, so if terminal B is stopped it fails with "endpoint unreachable".
+Go to http://localhost:3000/operator, enter the token `kavach-operator-local-0001`, and press **Activate** next to each agent under *Waiting for review*. Expected: "… is active: control proven again". Activation re-checks the endpoint, so if terminal B is stopped it fails with "endpoint unreachable".
 
 ### Step 3: Browse the marketplace
 
-http://localhost:3001/marketplace. Filter **Workers**, click the skill **summarize**, open a card: you see its endpoint, the account it pays, model, skills, and "Third party" vs "This deployment".
+http://localhost:3000/marketplace. Filter **Workers**, click the skill **summarize**, open a card: you see its endpoint, the account it pays, model, skills, and "Third party" vs "This deployment".
 
 ### Step 4: Sign up as a requester
 
-http://localhost:3001/tasks → **Create a requester account** → name it → copy the token shown once → **I saved it, open the console**.
+http://localhost:3000/tasks → **Create a requester account** → name it → copy the token shown once → **I saved it, open the console**.
 
 ### Step 5: Propose a task and choose the worker yourself
 
@@ -181,13 +171,13 @@ Variation: on another risky task, click **Withdraw** while it waits for approval
 
 ### Step 10: The payment firewall on its own, with your verifier
 
-http://localhost:3001/check → **Phishing scam** → **Check and pay if safe**. The backend has an operator token set, so you are asked for it: enter `kavach-operator-local-0001` and run again.
+http://localhost:3000/check → **Phishing scam** → **Check and pay if safe**. The backend has an operator token set, so you are asked for it: enter `kavach-operator-local-0001` and run again.
 
 Expected: **Held**, *high risk*, and under **Why** three link opinions: `domain-heuristics`, **`gemini-link-judge`** (your verifier, by its own name) and `link-intel`, plus the pressure phrases. Try **Electricity bill** (paid), **Wrong account** (held, account mismatch), **Rent** (needs a human), **Tuition** (blocked, over the hard cap).
 
 ### Step 11: Suspend an agent
 
-On http://localhost:3001/operator press **Suspend** next to `gemini-summarizer`. Propose a summary task again: it is no longer suggested. Activate it again to bring it back.
+On http://localhost:3000/operator press **Suspend** next to `gemini-summarizer`. Propose a summary task again: it is no longer suggested. Activate it again to bring it back.
 
 ## 5. The same thing over the API (agent to agent)
 

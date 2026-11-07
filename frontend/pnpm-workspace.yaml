@@ -1,7 +1,0 @@
-allowBuilds:
-  esbuild: false
-  protobufjs: false
-  sharp: false
-  unrs-resolver: false
-fetchTimeout: 600000
-fetchRetries: 5

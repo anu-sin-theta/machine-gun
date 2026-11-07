@@ -4,7 +4,7 @@ const result = (page: Page) => page.getByTestId("result");
 
 /** Pick an example, submit, and wait for the result card. */
 async function run(page: Page, example: string) {
-  await page.goto("/");
+  await page.goto("/demo");
   await page.getByTestId(`example-${example}`).click();
   await page.getByTestId("submit").click();
   await expect(result(page)).toBeVisible();
@@ -15,7 +15,7 @@ async function chooseOnWorld(page: Page, button: RegExp) {
   await page.getByTestId("approve-link").click();
   await expect(page.getByText("SIMULATION.")).toBeVisible();
   await page.getByRole("button", { name: button }).click();
-  await page.waitForURL(/\/\?check=/);
+  await page.waitForURL(/\/demo\?check=/);
   await expect(result(page)).toBeVisible();
 }
 
@@ -23,8 +23,8 @@ test.describe("the page", () => {
   test("explains itself and says that it is running on stand-ins", async ({
     page,
   }) => {
-    await page.goto("/");
-    await expect(page).toHaveTitle("Kavach402");
+    await page.goto("/demo");
+    await expect(page).toHaveTitle(/Classic demo/);
     await expect(
       page.getByRole("heading", { name: "Kavach402" }),
     ).toBeVisible();
@@ -38,7 +38,7 @@ test.describe("the page", () => {
   test("shows a clear message for a check it does not know", async ({
     page,
   }) => {
-    await page.goto("/?check=chk_does_not_exist");
+    await page.goto("/demo?check=chk_does_not_exist");
     await expect(page.getByTestId("unknown-check")).toContainText("not found");
   });
 
@@ -205,7 +205,7 @@ test.describe("input handling", () => {
   test("keeps what was typed and shows an error when the merchant is not allowed", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/demo");
     await page
       .getByLabel("Payment request")
       .fill("Please pay 1 HBAR to 0.0.5001");
@@ -234,7 +234,7 @@ test.describe("the verifier network", () => {
   test("shows the registered verifiers with what they charge", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/demo");
     const network = page.getByTestId("verifier-network");
     await expect(network).toBeVisible();
     await expect(page.getByTestId("verifier")).toHaveCount(3);

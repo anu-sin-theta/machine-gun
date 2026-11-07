@@ -224,7 +224,7 @@ async function main() {
     c.info(`${t.id}  ${t.status.padEnd(18)} ${t.workerId ?? "-"}`);
 
   console.log(
-    `\nToken for the web console (http://localhost:3001/tasks → "Already have a token?"):\n  ${token}\n`,
+    `\nToken for the web console (${BASE}/tasks → "Already have a token?"):\n  ${token}\n`,
   );
 }
 
