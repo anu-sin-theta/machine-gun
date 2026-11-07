@@ -94,8 +94,20 @@ export const AGENTS = [
   },
 ];
 
+/**
+ * Where an agent is reached. Locally each agent has its own port; deployed
+ * (AGENTS_BASE_URL set, e.g. https://kavach-agents.onrender.com) they share
+ * one host under /agents/<id>.
+ */
+export function agentBase(agent, baseUrl = process.env.AGENTS_BASE_URL) {
+  return baseUrl
+    ? `${baseUrl.replace(/\/+$/, "")}/agents/${agent.id}`
+    : `http://localhost:${agent.port}`;
+}
+
 /** What Kavach402's registry expects for an agent (POST /api/agents). */
-export function registration(agent, host = "http://localhost") {
+export function registration(agent, baseUrl) {
+  const host = agentBase(agent, baseUrl);
   const base = {
     id: agent.id,
     role: agent.role,
@@ -107,14 +119,14 @@ export function registration(agent, host = "http://localhost") {
   if (agent.role === "verifier")
     return {
       ...base,
-      endpoint: `${host}:${agent.port}/check`,
+      endpoint: `${host}/check`,
       input: agent.input,
       evidenceSource: agent.evidenceSource,
     };
   return {
     ...base,
-    endpoint: `${host}:${agent.port}/v1`,
-    model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+    endpoint: `${host}/v1`,
+    model: process.env.GEMINI_MODEL ?? "gemini-3.8-flash",
     skills: agent.skills,
   };
 }

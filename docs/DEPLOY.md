@@ -2,6 +2,41 @@
 
 Nothing here has been run on Vercel or Neon yet (no accounts were available while building). The pieces it relies on are tested separately: the production build, the migration and every SQL statement against a real Postgres engine, and the app's behaviour in the browser. Treat the first deploy as the first live test, and run the preflight below.
 
+## What gets deployed
+
+| Service | Folder | Where | Notes |
+|---|---|---|---|
+| **Backend** (API, firewall, registry, tasks, World ID callback) | repository root | Vercel project 1 | Needs Neon (`DATABASE_URL`) |
+| **Web app** | `frontend/` | Vercel project 2, root directory `frontend` | Set `BACKEND_URL` to the backend's URL; it proxies `/api/*` there |
+| **Example agents** (optional: Gemini workers and verifier) | `examples/gemini-agents/` | Any Node host or container (Render, Railway, Fly, Cloud Run) | One port, every agent under `/agents/<id>`; needs `GEMINI_API_KEY` |
+
+### Quick recipe: a public demo of the whole thing
+
+1. **Neon:** create a database, then from the repository root:
+   ```bash
+   DATABASE_URL="postgres://..." pnpm db:migrate
+   ```
+2. **Backend on Vercel:** import the repository (root directory: the repository root). Set:
+   `AGENT_MODE=demo`, `WORLD_MODE=simulated`, `WORLD_SIM_KEY` (from `pnpm gen:sim-key`), `DATABASE_URL`, `API_TOKEN` (16+ characters), and `APP_BASE_URL=https://<backend>.vercel.app`. Deploy, then open `https://<backend>.vercel.app/api/health`.
+3. **Web app on Vercel:** import the same repository as a second project with root directory `frontend`, and set `BACKEND_URL=https://<backend>.vercel.app`. The build fails with a clear message if it is missing.
+4. **Agents (optional):** deploy `examples/gemini-agents` as a Node web service. Build: `npm install`. Start: `npm start`. Environment: `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3.8-flash`. The platform's `PORT` switches it to one-port mode. Or use the Dockerfile there:
+   ```bash
+   docker build -t kavach-agents examples/gemini-agents
+   ```
+   ```bash
+   docker run -p 8080:8080 -e GEMINI_API_KEY=... kavach-agents
+   ```
+   `GET /` on the service lists the agents and the model.
+5. **Onboard the agents** into the deployed backend, from your machine:
+   ```bash
+   KAVACH_URL=https://<backend>.vercel.app AGENTS_BASE_URL=https://<agents-host> API_TOKEN=<API_TOKEN> pnpm walkthrough
+   ```
+   It registers and activates them and runs the sample tasks. Or register them by hand at `/marketplace/list` on the web app (endpoints `https://<agents-host>/agents/<id>/v1`, verifier `…/agents/gemini-link-judge/check`) and activate them at `/operator`.
+
+A deployed backend accepts only public `https` agent endpoints: `http://localhost` agents work only when the backend itself runs on localhost or a private LAN address.
+
+The example agents accept only the demo payment marker, so they work with a **demo** backend. A live backend pays with real x402; real workers must verify and settle those payments through a facilitator.
+
 ## Pick a mode first
 
 | | Demo deployment | Live deployment |

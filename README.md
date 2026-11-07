@@ -205,7 +205,7 @@ Leave `AGENT_MODE` unset, fill in the Hedera accounts, 0G key and (later) World 
    LIVE_BASE_URL=http://localhost:3000 pnpm test:live
    ```
 
-Vercel and Neon checklist: [docs/DEPLOY.md](docs/DEPLOY.md).
+**Deploying:** the backend and the web app go to Vercel as two projects (root and `frontend/`), with Neon for storage; the example agents run on any Node host or as a container (`examples/gemini-agents/Dockerfile`). The step-by-step recipe, including onboarding the agents into the deployed backend, is in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ---
 

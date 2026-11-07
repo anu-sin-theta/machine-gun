@@ -14,8 +14,9 @@
  * backend's own built-in routes use `withX402` for that).
  *
  * Usage (from machine-gun/):
- *   node examples/gemini-agents/server.mjs            # needs GEMINI_API_KEY in .env
+ *   node examples/gemini-agents/server.mjs            # one port per agent, 4101-4106; GEMINI_API_KEY in .env
  *   node examples/gemini-agents/server.mjs --offline  # no Gemini calls, labelled stand-in answers
+ *   PORT=8080 node examples/gemini-agents/server.mjs  # deployed: every agent on one port under /agents/<id>
  */
 
 import { createServer } from "node:http";
@@ -30,7 +31,7 @@ try {
 
 const OFFLINE = process.argv.includes("--offline");
 const KEY = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const NETWORK = `hedera:${process.env.HEDERA_NETWORK ?? "testnet"}`;
 const DEMO_PAYMENT = "demo-unsettled";
 const GEMINI_URL =
@@ -128,8 +129,8 @@ const readBody = (req) =>
     });
   });
 
-async function worker(agent, req, res, url) {
-  if (req.method !== "POST" || url.pathname !== "/v1/chat/completions")
+async function worker(agent, req, res, url, route) {
+  if (req.method !== "POST" || route !== "/v1/chat/completions")
     return send(res, 404, { error: "POST /v1/chat/completions" });
   const body = await readBody(req);
   const paid = req.headers["payment-signature"];
@@ -165,8 +166,8 @@ async function worker(agent, req, res, url) {
   }
 }
 
-async function verifier(agent, req, res, url) {
-  if (req.method !== "GET" || url.pathname !== "/check")
+async function verifier(agent, req, res, url, route) {
+  if (req.method !== "GET" || route !== "/check")
     return send(res, 404, { error: "GET /check?url=…" });
   const link = url.searchParams.get("url");
   const paid = req.headers["payment-signature"];
@@ -202,19 +203,55 @@ async function verifier(agent, req, res, url) {
   }
 }
 
-for (const agent of AGENTS) {
-  createServer((req, res) => {
-    const url = new URL(req.url ?? "/", `http://localhost:${agent.port}`);
-    const handler = agent.role === "verifier" ? verifier : worker;
-    handler(agent, req, res, url).catch((e) => {
-      console.error(`[${agent.id}]`, e);
-      send(res, 500, { error: "internal error" });
-    });
-  }).listen(agent.port, () => {
-    console.log(
-      `${agent.id.padEnd(22)} ${agent.role.padEnd(8)} http://localhost:${agent.port}  ${(Number(agent.priceTinybars) / 1e8).toString()} HBAR`,
-    );
+function dispatch(agent, req, res, url, route) {
+  const handler = agent.role === "verifier" ? verifier : worker;
+  handler(agent, req, res, url, route).catch((e) => {
+    console.error(`[${agent.id}]`, e);
+    send(res, 500, { error: "internal error" });
   });
+}
+
+const hbar = (agent) => (Number(agent.priceTinybars) / 1e8).toString();
+
+if (process.env.PORT) {
+  // One port for everything (what hosting platforms give you): each agent lives
+  // under /agents/<id>, e.g. /agents/gemini-summarizer/v1/chat/completions.
+  const port = Number(process.env.PORT);
+  createServer((req, res) => {
+    const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+    if (url.pathname === "/" || url.pathname === "/health")
+      return send(res, 200, {
+        ok: true,
+        model: OFFLINE ? "offline" : MODEL,
+        agents: AGENTS.map((a) => ({
+          id: a.id,
+          role: a.role,
+          path: `/agents/${a.id}`,
+        })),
+      });
+    const m = /^\/agents\/([a-z0-9-]+)(\/.*)?$/.exec(url.pathname);
+    const agent = m && AGENTS.find((a) => a.id === m[1]);
+    if (!agent) return send(res, 404, { error: "unknown agent" });
+    dispatch(agent, req, res, url, m[2] ?? "/");
+  }).listen(port, () => {
+    console.log(`Example agents on port ${port}:`);
+    for (const a of AGENTS)
+      console.log(
+        `  ${a.id.padEnd(22)} ${a.role.padEnd(8)} /agents/${a.id}  ${hbar(a)} HBAR`,
+      );
+  });
+} else {
+  // Local development: one port per agent (4101-4106).
+  for (const agent of AGENTS) {
+    createServer((req, res) => {
+      const url = new URL(req.url ?? "/", `http://localhost:${agent.port}`);
+      dispatch(agent, req, res, url, url.pathname);
+    }).listen(agent.port, () => {
+      console.log(
+        `${agent.id.padEnd(22)} ${agent.role.padEnd(8)} http://localhost:${agent.port}  ${hbar(agent)} HBAR`,
+      );
+    });
+  }
 }
 console.log(
   OFFLINE

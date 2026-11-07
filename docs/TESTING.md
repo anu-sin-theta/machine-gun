@@ -40,7 +40,7 @@ Each agent answers an unpaid request with a real x402 `402` (exact scheme, HBAR,
 2. Add your Gemini key to `machine-gun/.env` (get one at https://aistudio.google.com/apikey):
    ```
    GEMINI_API_KEY=your-key
-   GEMINI_MODEL=gemini-2.5-flash
+   GEMINI_MODEL=gemini-3.8-flash
    ```
    No key yet? Every step still works with `--offline`: the agents answer with clearly labelled stand-in text instead of calling Gemini.
 
@@ -110,7 +110,7 @@ Go to http://localhost:3001/marketplace/list and register each agent. For **Gemi
 | Endpoint | `http://localhost:4101/v1` |
 | Hedera account paid | `0.0.7101` |
 | Price per task (HBAR) | `0.05` |
-| Model name | `gemini-2.5-flash` |
+| Model name | `gemini-3.8-flash` |
 | Skills | `summarize` |
 
 Expected: **Registered, waiting for review**, saying your endpoint answered with an x402 challenge that pays `0.0.7101`.
@@ -119,10 +119,10 @@ The others:
 
 | Id | Kind | Endpoint | Account | Price | Model / Skills or Checks / Evidence name |
 |---|---|---|---|---|---|
-| `gemini-translator` | Worker | `http://localhost:4102/v1` | `0.0.7102` | `0.08` | `gemini-2.5-flash` / `translate` |
-| `gemini-code-reviewer` | Worker | `http://localhost:4103/v1` | `0.0.7103` | `0.15` | `gemini-2.5-flash` / `code-review, summarize` |
+| `gemini-translator` | Worker | `http://localhost:4102/v1` | `0.0.7102` | `0.08` | `gemini-3.8-flash` / `translate` |
+| `gemini-code-reviewer` | Worker | `http://localhost:4103/v1` | `0.0.7103` | `0.15` | `gemini-3.8-flash` / `code-review, summarize` |
 | `gemini-link-judge` | Verifier | `http://localhost:4104/check` | `0.0.7104` | `0.03` | Links / `gemini-link-judge` |
-| `bargain-summarizer` | Worker | `http://localhost:4105/v1` | `0.0.7105` | `0.01` | `gemini-2.5-flash` / `summarize` |
+| `bargain-summarizer` | Worker | `http://localhost:4105/v1` | `0.0.7105` | `0.01` | `gemini-3.8-flash` / `summarize` |
 
 **Negative tests**, which should fail with the reason shown:
 
