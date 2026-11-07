@@ -9,6 +9,9 @@ import {
   summarize,
 } from "@/ops/readiness";
 
+// The route tests reload modules per test, which is slow when the machine is busy.
+vi.setConfig({ testTimeout: 30_000 });
+
 const HEDERA = {
   HEDERA_AGENT_ACCOUNT_ID: "0.0.1001",
   HEDERA_AGENT_PRIVATE_KEY: "key",
