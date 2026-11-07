@@ -501,9 +501,15 @@ fn host_signals(h: &HostInfo, cfg: &LinkIntelConfig, stage: Stage, push: &mut Pu
             .trim_end_matches('.'),
     );
     let mut flagged: BTreeSet<(SignalCode, String)> = BTreeSet::new();
+    // A host on any brand's real domain is that brand's own, subdomains included
+    // (npi.sbi.co.in is SBI's), so it is never an imitation of another brand.
+    let on_official_domain = cfg
+        .brands
+        .iter()
+        .any(|b| b.domains.iter().any(|d| d == registrable));
     for brand in &cfg.brands {
-        if brand.domains.iter().any(|d| d == registrable) {
-            continue; // the real brand domain
+        if on_official_domain {
+            continue;
         }
         for bt in &brand.tokens {
             let bt = bt.to_lowercase();
@@ -680,6 +686,33 @@ mod tests {
             assert_eq!(r.level, RiskLevel::Low, "{url}: {:?}", r.signals);
             assert!(r.signals.is_empty(), "{url}: {:?}", r.signals);
             assert_eq!(r.score, 0);
+        }
+    }
+
+    #[test]
+    fn a_subdomain_of_one_brands_real_domain_is_never_an_imitation_of_another() {
+        // Found by the property test: "npi" is one letter from NPCI, but the host is SBI's.
+        for url in [
+            "https://npi.sbi.co.in/",
+            "https://paypa1.sbi.co.in/login",
+            "https://hdfcbamk.paypal.com/",
+        ] {
+            let r = run(url);
+            assert!(r.signals.is_empty(), "{url}: {:?}", r.signals);
+            assert_eq!(r.level, RiskLevel::Low, "{url}");
+        }
+        // The same labels on a domain nobody official owns are still caught.
+        for url in [
+            "https://npi.evil-bank.top/",
+            "https://paypa1.sbi-secure.top/",
+        ] {
+            let r = run(url);
+            assert!(
+                codes(&r).contains(&SignalCode::LookalikeBrand)
+                    || codes(&r).contains(&SignalCode::BrandImpersonation),
+                "{url}: {:?}",
+                r.signals
+            );
         }
     }
 
