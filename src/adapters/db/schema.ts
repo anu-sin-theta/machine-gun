@@ -58,8 +58,14 @@ export const tasks = pgTable(
   {
     id: text("id").primaryKey(),
     accountId: text("account_id").notNull(),
-    workerId: text("worker_id").notNull(),
+    workerId: text("worker_id"),
     prompt: text("prompt").notNull(),
+    skill: text("skill"),
+    requestedAgentId: text("requested_agent_id"),
+    /** TaskCandidate[] */
+    candidates: jsonb("candidates").notNull().default([]),
+    /** string[] */
+    excluded: jsonb("excluded").notNull().default([]),
     maxPriceTinybars: numeric("max_price_tinybars", {
       precision: 40,
       scale: 0,

@@ -41,3 +41,11 @@ export function readChallenge(
 /** Where a worker's OpenAI-compatible endpoint takes tasks. */
 export const chatCompletionsUrl = (endpoint: string) =>
   `${endpoint.replace(/\/+$/, "")}/chat/completions`;
+
+/**
+ * What demo mode sends in place of a signed x402 payment when it calls a
+ * third-party agent. Nothing is settled: an agent that wants to be testable
+ * against a demo deployment may accept it, and must never accept it when it
+ * expects real money (see examples/gemini-agents).
+ */
+export const DEMO_PAYMENT = "demo-unsettled";

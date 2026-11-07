@@ -23,6 +23,7 @@ async function load(env: Record<string, string>) {
     accounts: await import("@/app/api/accounts/route"),
     tasks: await import("@/app/api/tasks/route"),
     task: await import("@/app/api/tasks/[id]/route"),
+    action: await import("@/app/api/tasks/[id]/[action]/route"),
     card: await import("@/app/.well-known/agent-card.json/route"),
     settle: () => Promise.all(background),
   };
@@ -53,6 +54,9 @@ const get = (url: string, token?: string) =>
     headers: token ? { authorization: `Bearer ${token}` } : {},
   });
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
+const actionCtx = (id: string, action: string) => ({
+  params: Promise.resolve({ id, action }),
+});
 
 async function signUp(
   m: Awaited<ReturnType<typeof load>>,
@@ -129,7 +133,7 @@ describe("tasks API", () => {
     ).toBe(401);
   });
 
-  it("proposes a task, runs it in the background, and shows progress and the answer", async () => {
+  it("proposes a task, lets the requester accept a suggestion, runs it in the background, and shows progress and the answer", async () => {
     const m = await load(DEMO);
     const token = await signUp(m);
     const res = await m.tasks.POST(
@@ -143,14 +147,31 @@ describe("tasks API", () => {
         token,
       ),
     );
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(201);
     const { task } = await res.json();
     expect(res.headers.get("location")).toBe(`/api/tasks/${task.id}`);
     expect(task).toMatchObject({
-      status: "queued",
-      workerId: "kavach-scribe",
+      status: "awaiting-choice",
+      actions: ["accept", "research", "edit", "withdraw"],
+      workerId: null,
       maxPriceTinybars: "20000000",
       maxPrice: "0.2 HBAR",
+    });
+    expect(task.candidates[0]).toMatchObject({
+      workerId: "kavach-scribe",
+      price: "0.1 HBAR",
+      recommended: true,
+    });
+
+    const accepted = await m.action.POST(
+      json(`http://localhost/api/tasks/${task.id}/accept`, {}, token),
+      actionCtx(task.id, "accept"),
+    );
+    expect(accepted.status).toBe(202);
+    expect((await accepted.json()).task).toMatchObject({
+      status: "queued",
+      workerId: "kavach-scribe",
+      actions: ["withdraw"],
     });
 
     await m.settle();
@@ -172,6 +193,103 @@ describe("tasks API", () => {
       await m.tasks.GET(get("http://localhost/api/tasks", token))
     ).json();
     expect(list.tasks.map((t: { id: string }) => t.id)).toContain(task.id);
+  });
+
+  it("with autoAccept, runs at once (202)", async () => {
+    const m = await load(DEMO);
+    const token = await signUp(m);
+    const res = await m.tasks.POST(
+      json(
+        "http://localhost/api/tasks",
+        {
+          prompt: "Summarise: quick.",
+          skill: "summarize",
+          maxPriceTinybars: "20000000",
+          autoAccept: true,
+        },
+        token,
+      ),
+    );
+    expect(res.status).toBe(202);
+    await m.settle();
+  });
+
+  it("edits, searches again and withdraws over HTTP", async () => {
+    const m = await load(DEMO);
+    const token = await signUp(m);
+    const { task } = await (
+      await m.tasks.POST(
+        json(
+          "http://localhost/api/tasks",
+          {
+            prompt: "Translate this.",
+            skill: "translate",
+            maxPriceTinybars: "20000000",
+          },
+          token,
+        ),
+      )
+    ).json();
+    expect(task.candidates).toEqual([]);
+
+    const edited = await m.task.PATCH(
+      new Request(`http://localhost/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ skill: "summarize", prompt: "Summarise this." }),
+      }),
+      ctx(task.id),
+    );
+    expect(edited.status).toBe(200);
+    const e = (await edited.json()).task;
+    expect(e).toMatchObject({ skill: "summarize", prompt: "Summarise this." });
+    expect(e.candidates[0].workerId).toBe("kavach-scribe");
+
+    const researched = await m.action.POST(
+      json(
+        `http://localhost/api/tasks/${task.id}/research`,
+        { exclude: ["kavach-scribe"] },
+        token,
+      ),
+      actionCtx(task.id, "research"),
+    );
+    expect((await researched.json()).task).toMatchObject({
+      candidates: [],
+      excluded: ["kavach-scribe"],
+    });
+
+    const withdrawn = await m.action.POST(
+      json(`http://localhost/api/tasks/${task.id}/withdraw`, {}, token),
+      actionCtx(task.id, "withdraw"),
+    );
+    expect((await withdrawn.json()).task).toMatchObject({
+      status: "withdrawn",
+      actions: [],
+    });
+
+    const again = await m.action.POST(
+      json(`http://localhost/api/tasks/${task.id}/accept`, {}, token),
+      actionCtx(task.id, "accept"),
+    );
+    expect(again.status).toBe(409);
+    const unknown = await m.action.POST(
+      json(`http://localhost/api/tasks/${task.id}/pause`, {}, token),
+      actionCtx(task.id, "pause"),
+    );
+    expect(unknown.status).toBe(404);
+    const noAuth = await m.action.POST(
+      json(`http://localhost/api/tasks/${task.id}/withdraw`, {}),
+      actionCtx(task.id, "withdraw"),
+    );
+    expect(noAuth.status).toBe(401);
+    const noAuthEdit = await m.task.PATCH(
+      json(`http://localhost/api/tasks/${task.id}`, {}),
+      ctx(task.id),
+    );
+    expect(noAuthEdit.status).toBe(401);
   });
 
   it("hides one account's tasks from another", async () => {
@@ -206,18 +324,18 @@ describe("tasks API", () => {
     expect(bobs.tasks).toEqual([]);
   });
 
-  it("passes on the reason a task cannot be proposed", async () => {
+  it("passes on why a task cannot be proposed", async () => {
     const m = await load(DEMO);
     const token = await signUp(m);
     const res = await m.tasks.POST(
       json(
         "http://localhost/api/tasks",
-        { prompt: "x", skill: "translate", maxPriceTinybars: "20000000" },
+        { prompt: "x", maxPriceTinybars: "1" },
         token,
       ),
     );
-    expect(res.status).toBe(404);
-    expect((await res.json()).error).toMatch(/no active worker/);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/agentId or skill/);
   });
 });
 

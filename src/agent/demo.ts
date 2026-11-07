@@ -16,6 +16,9 @@ import { reputationEvidence } from "@/adapters/hedera";
 import { checkLink } from "@/adapters/x402/checkers";
 import type { Extraction, ZeroG } from "@/adapters/zerog";
 import { DEMO_PAYEE } from "@/marketplace/builtins";
+import { DEMO_PAYMENT, readChallenge } from "@/marketplace/challenge";
+import { validateEndpoint } from "@/marketplace/endpoint";
+import { parseVerifierResponse } from "@/marketplace/evidence";
 import { domainHeuristics } from "@/marketplace/heuristics";
 import {
   type AgentDeps,
@@ -231,15 +234,70 @@ const demoLogs = (): NonNullable<AgentDeps["logs"]> => ({
 });
 
 /** The ports for demo mode. The caller adds repos, approval, policy, clock and randomness. */
-export function createDemoPorts(merchantOrigins: readonly string[]): Pick<
-  AgentDeps,
-  "zerog" | "probe" | "payer" | "logs"
-> & {
+/** How demo mode reaches third-party agents: the address-checking fetch, on the configured network. */
+export interface DemoRemote {
+  network: "hedera:testnet" | "hedera:mainnet";
+  safeFetch: typeof fetch;
+  allowLocalEndpoints?: boolean;
+}
+
+/** Most demo mode will "pay" any one verifier call, like live mode's ceiling. */
+const DEMO_VERIFIER_CEILING = 10_000_000n;
+
+/**
+ * A third-party verifier in demo mode: its unpaid 402 is probed and checked
+ * as in live mode (payee, price), then it is asked with `DEMO_PAYMENT` in
+ * place of a signed payment. Its evidence goes through the same relabelling
+ * and cleaning as live evidence.
+ */
+function remoteVerifier(remote: DemoRemote): VerifierNetwork["call"] {
+  return async (listing, subject) => {
+    const reject = (why: string) => new AgentError("VERIFIER_REJECTED", why);
+    if (listing.role !== "verifier" || listing.status !== "active")
+      throw reject("not an active verifier");
+    if (listing.input !== subject.kind)
+      throw reject(`${listing.id} does not answer ${subject.kind} questions`);
+    if (listing.priceTinybars > DEMO_VERIFIER_CEILING)
+      throw reject("listed price is above the ceiling");
+    const endpoint = validateEndpoint(listing.endpoint, {
+      allowLocalHttp: remote.allowLocalEndpoints ?? false,
+    });
+    if (!endpoint.ok) throw reject(`endpoint refused: ${endpoint.reason}`);
+    const url = new URL(endpoint.url);
+    if (subject.kind === "link") url.searchParams.set("url", subject.url);
+    else url.searchParams.set("payee", subject.account);
+
+    const challenge = readChallenge(
+      await remote.safeFetch(url),
+      remote.network,
+    );
+    if (!challenge.ok) throw reject(challenge.reason);
+    if (challenge.payTo !== listing.payTo)
+      throw reject("verifier asks to be paid to another account");
+    if (challenge.amount > listing.priceTinybars)
+      throw reject("verifier asks for more than its listed price");
+
+    const res = await remote.safeFetch(url, {
+      headers: { "PAYMENT-SIGNATURE": DEMO_PAYMENT },
+    });
+    if (!res.ok) throw reject(`${listing.id} returned ${res.status}`);
+    return parseVerifierResponse(await res.json(), listing);
+  };
+}
+
+export function createDemoPorts(
+  merchantOrigins: readonly string[],
+  remote?: DemoRemote,
+): Pick<AgentDeps, "zerog" | "probe" | "payer" | "logs"> & {
   callVerifier: VerifierNetwork["call"];
 } {
   return {
     zerog: demoZeroG(),
-    callVerifier: demoCallVerifier,
+    // Built-in verifiers run locally; third-party ones are called over HTTP when possible.
+    callVerifier: async (listing, subject) =>
+      !listing.builtIn && remote
+        ? remoteVerifier(remote)(listing, subject)
+        : demoCallVerifier(listing, subject),
     probe: demoProbe(merchantOrigins),
     payer: demoPayer(),
     logs: demoLogs(),

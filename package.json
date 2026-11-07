@@ -24,7 +24,9 @@
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
     "gen:sim-key": "node scripts/gen-sim-key.mjs",
     "setup:hedera": "node --env-file=.env scripts/create-topics.mjs",
-    "test:rust": "cd rust && cargo test --workspace --locked"
+    "test:rust": "cd rust && cargo test --workspace --locked",
+    "agents:gemini": "node examples/gemini-agents/server.mjs",
+    "walkthrough": "node scripts/walkthrough.mjs"
   },
   "dependencies": {
     "@hiero-ledger/sdk": "2.90.1",

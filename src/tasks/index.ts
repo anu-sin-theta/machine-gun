@@ -27,15 +27,19 @@ export function getTaskDeps(): TaskDeps {
     now,
     random: (bytes: number) => randomBytes(bytes).toString("base64url"),
   };
+  const { hedera } = config;
+  const local = isLocalOrigin(config.baseUrl);
   if (config.agentMode === "demo")
     return {
       ...base,
       workerPorts: (listing, task, hooks) =>
-        createDemoWorkerPorts(listing, task, hooks, now),
+        createDemoWorkerPorts(listing, task, hooks, now, {
+          network: `hedera:${hedera.network}`,
+          safeFetch: createSafeFetch({ allowLocal: local }),
+          allowLocalEndpoints: local,
+        }),
     };
 
-  const { hedera } = config;
-  const local = isLocalOrigin(config.baseUrl);
   return {
     ...base,
     workerPorts: (listing, task, hooks) => {

@@ -23,7 +23,12 @@ export function getAgentDeps(): AgentDeps {
   const directory = getDirectory();
 
   if (config.agentMode === "demo") {
-    const { callVerifier, ...ports } = createDemoPorts(config.merchantOrigins);
+    const local = isLocalOrigin(config.baseUrl);
+    const { callVerifier, ...ports } = createDemoPorts(config.merchantOrigins, {
+      network: `hedera:${hedera.network}`,
+      safeFetch: createSafeFetch({ allowLocal: local }),
+      allowLocalEndpoints: local,
+    });
     return {
       repos: getRepositories(),
       ...ports,

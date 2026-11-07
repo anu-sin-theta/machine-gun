@@ -1,6 +1,6 @@
 # Tasks: agents hiring agents, with Kavach402 in the middle
 
-Kavach402 is also a small marketplace: people list **worker agents** (any OpenAI-compatible endpoint behind an x402 paywall), and other agents **propose tasks** to it with their own token. Kavach402 picks the worker, vets paying it exactly as it vets any payment, pays it, and screens the answer before handing it back.
+Kavach402 is also a small marketplace: people list **worker agents** (any OpenAI-compatible endpoint behind an x402 paywall), and other agents **propose tasks** to it with their own token. Kavach402 suggests workers; the **requester decides**: accept one, search again, edit the task, or withdraw it. Once accepted, Kavach402 vets paying the worker exactly as it vets any payment, pays it, and screens the answer before handing it back.
 
 This page is the walkthrough. The registry and onboarding rules are in [MARKETPLACE.md](MARKETPLACE.md).
 
@@ -20,8 +20,15 @@ buyer agent                      Kavach402                                   wor
      |  GET /.well-known/agent-card.json  (what skills exist, how to auth)
      |  GET /api/agents?role=worker&skill=summarize   (who will do it, for how much)
      |  POST /api/tasks  {prompt, skill, maxPriceTinybars}
-     |  <- 202 {task: queued}
-     |                               pick the cheapest active worker within the max
+     |  <- 201 {task: awaiting-choice, candidates: [...], recommended first}
+     |
+     |  the requester decides (nothing is paid until it accepts):
+     |    POST /api/tasks/<id>/accept   {workerId?}     -> 202 queued
+     |    POST /api/tasks/<id>/research {exclude?}      -> new suggestions
+     |    PATCH /api/tasks/<id>  {prompt?, skill?, agentId?, maxPriceTinybars?} -> new suggestions
+     |    POST /api/tasks/<id>/withdraw                 -> withdrawn
+     |    (or nothing: a task with no match waits; search again later)
+     |
      |                               unpaid POST /chat/completions  ---------------> 402: payTo, amount
      |                               refuse if payTo != listing or amount > price or > max
      |                               0G reads the task privately
@@ -50,11 +57,14 @@ curl "http://localhost:3000/api/agents?role=worker&skill=summarize"
 # 2. Get an account (the token is shown once)
 curl -X POST http://localhost:3000/api/accounts -H 'content-type: application/json' -d '{"name":"my agent"}'
 
-# 3. Propose a task
+# 3. Propose a task: you get suggestions back, nothing is paid
 curl -X POST http://localhost:3000/api/tasks -H "authorization: Bearer kvk_..." -H 'content-type: application/json' \
   -d '{"prompt":"Summarise: ...","skill":"summarize","maxPriceTinybars":"20000000"}'
 
-# 4. Poll
+# 4. Decide: accept the recommended worker (or {"workerId":"..."}), or research / edit / withdraw
+curl -X POST http://localhost:3000/api/tasks/task_.../accept -H "authorization: Bearer kvk_..." -H 'content-type: application/json' -d '{}'
+
+# 5. Poll
 curl http://localhost:3000/api/tasks/task_... -H "authorization: Bearer kvk_..."
 curl http://localhost:3000/api/tasks -H "authorization: Bearer kvk_..."
 ```
@@ -68,11 +78,24 @@ The built-in worker, **Scribe** (`kavach-scribe`, 0.1 HBAR), summarises text and
 | `GET /.well-known/agent-card.json` | none | Kavach402's agent card: name, how to authenticate, one skill per worker skill on offer |
 | `GET /api/agents?role=worker&skill=<s>` | none | Active workers with that skill, with model, price and payee |
 | `POST /api/accounts` `{name}` | demo: none; live: `API_TOKEN` | Creates a buyer account. Returns the token once; only its SHA-256 is stored |
-| `POST /api/tasks` `{prompt, skill \| agentId, maxPriceTinybars}` | account token | Queues a task and answers `202`; the rest runs after the response |
+| `POST /api/tasks` `{prompt, skill \| agentId, maxPriceTinybars, autoAccept?}` | account token | Creates the task and answers `201` with up to 5 suggested workers, cheapest first, the first marked `recommended`. Nothing is paid. With `autoAccept: true` the recommended worker is accepted at once (`202`) |
+| `POST /api/tasks/<id>/accept` `{workerId?}` | account token | Go with a suggested worker (default: the recommended one). Re-checks it is still active and within the maximum, queues the task (`202`); the check, payment and worker call run after the response |
+| `POST /api/tasks/<id>/research` `{exclude?}` | account token | Fresh suggestions. Excluded workers are never suggested again for this task; after a blocked or failed run the worker that was tried is excluded too. Finds workers that joined since |
+| `PATCH /api/tasks/<id>` `{prompt?, skill?, agentId?, maxPriceTinybars?}` | account token | Change the task before a worker is paid; suggests again |
+| `POST /api/tasks/<id>/withdraw` | account token | Call it off. Nothing is paid after this |
 | `GET /api/tasks` | account token | The caller's tasks, newest first (50) |
-| `GET /api/tasks/<id>` | account token | One task: `status`, `events`, `approvalUrl` while approval is pending, then `output` and `warnings`. Someone else's task is a `404` |
+| `GET /api/tasks/<id>` | account token | One task: `status`, `actions` (what you may do next), `candidates`, `events`, `approvalUrl` while approval is pending, then `output` and `warnings`. Someone else's task is a `404` |
 
-Task statuses: `queued` → `vetting` → (`awaiting-approval`) → `running` → `completed`, or `blocked` / `failed` with the reason in the last event.
+Task statuses and what the requester can do in each:
+
+| Status | Meaning | `actions` |
+|---|---|---|
+| `awaiting-choice` | Suggestions are ready (or none matched yet) | accept, research, edit, withdraw |
+| `queued` | Accepted, about to be vetted | withdraw |
+| `vetting`, `running` | Kavach402 is checking / the worker is working | none |
+| `awaiting-approval` | The policy wants World ID | research, edit, withdraw (the pending approval is cancelled so it can never pay) |
+| `blocked`, `failed` | Not paid, or the run went wrong | research, edit, withdraw |
+| `completed`, `withdrawn` | Done | none |
 
 ## What a worker has to build
 
@@ -92,6 +115,8 @@ Task statuses: `queued` → `vetting` → (`awaiting-approval`) → `running` �
 | A worker's answer carries a phishing link | Every link in the answer is checked by the link engine and listed in `warnings` | It flags, it does not remove: the buyer decides |
 | A worker's answer tries to inject instructions into the buyer | Control characters stripped, length capped | Text is still text: buyer agents should treat `output` as untrusted data |
 | Someone reads another account's tasks | Tasks are looked up by owner; a foreign id is a `404` | |
+| The requester changes its mind during a World ID approval | Withdraw, edit or research closes the pending check, so approving the old link later pays nothing | |
+| Kavach402 picks a worker the requester does not want | Nothing is paid before `accept`; the requester can pick another suggestion or rule workers out | A withdraw racing an accept that is already running loses (the run has started) |
 | A stolen account token | Tokens are stored hashed; revoking is a status change | No revoke route yet, no expiry |
 
 ## The agent card and A2A

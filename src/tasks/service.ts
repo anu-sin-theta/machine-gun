@@ -1,13 +1,19 @@
 /**
- * The task flow. A buyer agent proposes a task; this picks a worker, then runs
- * paying that worker through the ordinary Kavach402 check: the worker's own
- * 402 sets payee and price, 0G reads the request, verifiers report on the
- * payee, the policy decides, World ID approves when the policy says so, and
- * only then is the worker paid and called. Its answer is cleaned and its
- * links are checked before the buyer sees it.
+ * The task flow. The requester stays in charge: Kavach402 suggests workers and
+ * nothing is paid until the requester accepts one. Before that it can search
+ * again (ruling workers out), edit the task, or withdraw it; a task nobody
+ * matches waits until the requester searches again.
  *
- * Every step is appended to the task's events, which is what a buyer polls
- * for progress.
+ * Once accepted, paying the worker is an ordinary Kavach402 check: the
+ * worker's own 402 sets payee and price, 0G reads the request, verifiers
+ * report on the payee, the policy decides, World ID approves when the policy
+ * says so, and only then is the worker paid and called. Its answer is cleaned
+ * and its links are checked before the requester sees it. While a human
+ * approval is pending the requester can still withdraw, edit or search again;
+ * the pending approval is then cancelled so it can never pay.
+ *
+ * Every step is appended to the task's events, which is what a requester
+ * polls for progress.
  */
 
 import type { Repositories } from "@/adapters/db";
@@ -21,11 +27,16 @@ import type { AgentListing } from "@/marketplace/types";
 import { scanAnswer } from "./answer";
 import {
   type AccountRecord,
-  OPEN_TASK_STATUSES,
+  acceptSchema,
+  researchSchema,
+  type TaskCandidate,
   type TaskEvent,
   type TaskPatch,
   type TaskRecord,
+  type TaskStatus,
+  taskEditSchema,
   taskInputSchema,
+  UNFINISHED_TASK_STATUSES,
 } from "./types";
 import { taskCeiling, type WorkerHooks, type WorkerPorts } from "./worker";
 
@@ -33,6 +44,8 @@ import { taskCeiling, type WorkerHooks, type WorkerPorts } from "./worker";
 export const MAX_OPEN_TASKS = 5;
 /** Most tasks a listing call returns. */
 export const TASK_LIST_LIMIT = 50;
+/** Most workers suggested for one task. */
+export const MAX_CANDIDATES = 5;
 
 export interface TaskDeps {
   repos: Repositories;
@@ -49,15 +62,21 @@ export interface TaskDeps {
   random: (bytes: number) => string;
 }
 
-export type ProposeResult =
-  | { ok: true; task: TaskRecord }
-  | { ok: false; status: 400 | 404 | 422 | 429; error: string };
+export type TaskResult =
+  | {
+      ok: true;
+      task: TaskRecord /** The task is queued: run it. */;
+      run: boolean;
+    }
+  | { ok: false; status: 400 | 404 | 409 | 422 | 429; error: string };
 
-const fail = (status: 400 | 404 | 422 | 429, error: string): ProposeResult => ({
-  ok: false,
-  status,
-  error,
-});
+const fail = (
+  status: 400 | 404 | 409 | 422 | 429,
+  error: string,
+): TaskResult => ({ ok: false, status, error });
+
+const hbar = (units: bigint) =>
+  formatAmount({ asset: { kind: "HBAR" }, units });
 
 /** Appends an event and applies a patch in one write. */
 async function record(
@@ -76,46 +95,108 @@ async function record(
   });
 }
 
-/** The worker for a task: the named one, or the cheapest active one with the skill, within the buyer's maximum. */
-async function pickWorker(
+/** Active workers that fit the request, cheapest first; the first is the recommendation. */
+async function findCandidates(
   registry: TaskDeps["registry"],
-  input: { agentId?: string | undefined; skill?: string | undefined },
-  max: bigint,
-): Promise<AgentListing | ProposeResult> {
-  if (input.agentId) {
-    const listing = await registry.get(input.agentId);
-    if (listing?.role !== "worker" || listing.status !== "active")
-      return fail(404, "no active worker with that id");
-    if (listing.priceTinybars > max)
-      return fail(422, "that worker charges more than maxPriceTinybars");
-    return listing;
-  }
-  const candidates = (
-    await registry.all({
+  want: {
+    skill: string | null;
+    requestedAgentId: string | null;
+    max: bigint;
+    excluded: readonly string[];
+  },
+): Promise<TaskCandidate[]> {
+  let listings: AgentListing[];
+  if (want.requestedAgentId) {
+    const one = await registry.get(want.requestedAgentId);
+    listings = one ? [one] : [];
+  } else {
+    listings = await registry.all({
       role: "worker",
       status: "active",
-      ...(input.skill && { skill: input.skill }),
-    })
-  )
-    .filter((l) => l.priceTinybars <= max)
+      ...(want.skill && { skill: want.skill }),
+    });
+  }
+  return listings
+    .filter(
+      (l) =>
+        l.role === "worker" &&
+        l.status === "active" &&
+        l.priceTinybars <= want.max &&
+        !want.excluded.includes(l.id),
+    )
     .sort((a, b) =>
       a.priceTinybars < b.priceTinybars
         ? -1
         : a.priceTinybars > b.priceTinybars
           ? 1
           : a.id.localeCompare(b.id),
-    );
-  return (
-    candidates[0] ??
-    fail(404, "no active worker with that skill within maxPriceTinybars")
-  );
+    )
+    .slice(0, MAX_CANDIDATES)
+    .map((l, i) => ({
+      workerId: l.id,
+      name: l.name,
+      model: l.model,
+      skills: l.skills,
+      priceTinybars: l.priceTinybars.toString(),
+      builtIn: l.builtIn,
+      recommended: i === 0,
+    }));
 }
+
+function suggestedEvent(candidates: TaskCandidate[]): Omit<TaskEvent, "at"> {
+  const pick = candidates[0];
+  return {
+    type: "workers.suggested",
+    detail: pick
+      ? `${candidates.length} worker(s); recommended ${pick.workerId} at ${hbar(BigInt(pick.priceTinybars))}`
+      : "no worker matches yet; search again later, edit or withdraw",
+  };
+}
+
+/** Back to choosing: forget the accepted worker and anything from its run. */
+const CHOOSING: TaskPatch = {
+  status: "awaiting-choice",
+  workerId: null,
+  checkId: null,
+  approvalUrl: null,
+  output: null,
+  warnings: [],
+};
+
+/**
+ * A pending World ID approval must never pay once the requester has moved on:
+ * close its check so the callback refuses it.
+ */
+async function cancelPendingApproval(deps: TaskDeps, task: TaskRecord) {
+  if (task.status !== "awaiting-approval" || !task.checkId) return false;
+  const check = await deps.repos.checks.get(task.checkId);
+  if (check?.status === "awaiting-approval")
+    await deps.repos.checks.update(task.checkId, { status: "blocked" });
+  return true;
+}
+
+/** The caller's own task, in one of the allowed states. */
+async function ownTask(
+  deps: TaskDeps,
+  account: AccountRecord,
+  id: string,
+  allowed: readonly TaskStatus[],
+  action: string,
+): Promise<TaskRecord | TaskResult> {
+  const task = await deps.repos.tasks.get(id);
+  if (!task || task.accountId !== account.id) return fail(404, "unknown task");
+  if (!allowed.includes(task.status))
+    return fail(409, `cannot ${action} a task that is ${task.status}`);
+  return task;
+}
+
+const isResult = (v: TaskRecord | TaskResult): v is TaskResult => "ok" in v;
 
 export async function proposeTask(
   deps: TaskDeps,
   account: AccountRecord,
   raw: unknown,
-): Promise<ProposeResult> {
+): Promise<TaskResult> {
   const input = taskInputSchema.safeParse(raw);
   if (!input.success)
     return fail(400, input.error.issues[0]?.message ?? "invalid task");
@@ -126,48 +207,227 @@ export async function proposeTask(
     TASK_LIST_LIMIT,
   );
   if (
-    recent.filter((t) => OPEN_TASK_STATUSES.includes(t.status)).length >=
+    recent.filter((t) => UNFINISHED_TASK_STATUSES.includes(t.status)).length >=
     MAX_OPEN_TASKS
   )
     return fail(429, `at most ${MAX_OPEN_TASKS} unfinished tasks at a time`);
 
-  const worker = await pickWorker(deps.registry, input.data, max);
-  if ("ok" in worker) return worker;
+  const skill = input.data.skill ?? null;
+  const requestedAgentId = input.data.agentId ?? null;
+  const candidates = await findCandidates(deps.registry, {
+    skill,
+    requestedAgentId,
+    max,
+    excluded: [],
+  });
 
   const at = deps.now();
   const task: TaskRecord = {
     id: `task_${deps.random(12)}`,
     accountId: account.id,
-    workerId: worker.id,
     prompt: input.data.prompt,
+    skill,
+    requestedAgentId,
     maxPriceTinybars: max,
-    status: "queued",
+    status: "awaiting-choice",
+    candidates,
+    excluded: [],
+    workerId: null,
     checkId: null,
     approvalUrl: null,
     output: null,
     warnings: [],
     events: [
       { at, type: "task.created" },
-      {
-        at,
-        type: "worker.matched",
-        detail: `${worker.id} at ${formatAmount({ asset: { kind: "HBAR" }, units: worker.priceTinybars })}`,
-      },
+      { at, ...suggestedEvent(candidates) },
     ],
     createdAt: at,
     updatedAt: at,
   };
   await deps.repos.tasks.create(task);
-  return { ok: true, task };
+
+  if (input.data.autoAccept && candidates.length > 0)
+    return acceptTask(deps, account, task.id, {});
+  return { ok: true, task, run: false };
+}
+
+/** The requester picks a suggested worker (the recommended one by default). Queues the task. */
+export async function acceptTask(
+  deps: TaskDeps,
+  account: AccountRecord,
+  id: string,
+  raw: unknown,
+): Promise<TaskResult> {
+  const input = acceptSchema.safeParse(raw ?? {});
+  if (!input.success) return fail(400, "workerId must be a worker id");
+  const task = await ownTask(deps, account, id, ["awaiting-choice"], "accept");
+  if (isResult(task)) return task;
+
+  const choice = input.data.workerId
+    ? task.candidates.find((c) => c.workerId === input.data.workerId)
+    : task.candidates.find((c) => c.recommended);
+  if (!choice)
+    return fail(
+      422,
+      task.candidates.length
+        ? "that worker is not one of the suggestions; search again first"
+        : "no worker to accept; search again later, edit or withdraw",
+    );
+  // The suggestion may be stale: the worker must still be active and within the maximum.
+  const listing = await deps.registry.get(choice.workerId);
+  if (
+    listing?.role !== "worker" ||
+    listing.status !== "active" ||
+    listing.priceTinybars > task.maxPriceTinybars
+  )
+    return fail(409, "that worker is no longer available; search again");
+
+  const updated = await record(
+    deps,
+    id,
+    {
+      type: "worker.accepted",
+      detail: `${listing.id} at ${hbar(listing.priceTinybars)}`,
+    },
+    { status: "queued", workerId: listing.id },
+  );
+  return updated
+    ? { ok: true, task: updated, run: true }
+    : fail(404, "unknown task");
+}
+
+/** Fresh suggestions, ruling out the given workers (and, after a failed or blocked run, the worker that was tried). */
+export async function researchTask(
+  deps: TaskDeps,
+  account: AccountRecord,
+  id: string,
+  raw: unknown,
+): Promise<TaskResult> {
+  const input = researchSchema.safeParse(raw ?? {});
+  if (!input.success) return fail(400, "exclude must be a list of worker ids");
+  const task = await ownTask(
+    deps,
+    account,
+    id,
+    ["awaiting-choice", "awaiting-approval", "blocked", "failed"],
+    "search again for",
+  );
+  if (isResult(task)) return task;
+
+  const tried =
+    task.status !== "awaiting-choice" && task.workerId ? [task.workerId] : [];
+  const excluded = [
+    ...new Set([...task.excluded, ...(input.data.exclude ?? []), ...tried]),
+  ];
+  const cancelled = await cancelPendingApproval(deps, task);
+  const candidates = await findCandidates(deps.registry, {
+    skill: task.skill,
+    requestedAgentId: task.requestedAgentId,
+    max: task.maxPriceTinybars,
+    excluded,
+  });
+  if (cancelled)
+    await record(deps, id, {
+      type: "approval.cancelled",
+      detail: "searched again",
+    });
+  const updated = await record(deps, id, suggestedEvent(candidates), {
+    ...CHOOSING,
+    candidates,
+    excluded,
+  });
+  return updated
+    ? { ok: true, task: updated, run: false }
+    : fail(404, "unknown task");
+}
+
+/** Changes the prompt, target or maximum before a worker is paid, then suggests again. */
+export async function editTask(
+  deps: TaskDeps,
+  account: AccountRecord,
+  id: string,
+  raw: unknown,
+): Promise<TaskResult> {
+  const input = taskEditSchema.safeParse(raw);
+  if (!input.success)
+    return fail(400, input.error.issues[0]?.message ?? "invalid edit");
+  const task = await ownTask(
+    deps,
+    account,
+    id,
+    ["awaiting-choice", "awaiting-approval", "blocked", "failed"],
+    "edit",
+  );
+  if (isResult(task)) return task;
+
+  const edit = input.data;
+  const skill = edit.skill ?? (edit.agentId ? null : task.skill);
+  const requestedAgentId =
+    edit.agentId ?? (edit.skill ? null : task.requestedAgentId);
+  const max =
+    edit.maxPriceTinybars !== undefined
+      ? BigInt(edit.maxPriceTinybars)
+      : task.maxPriceTinybars;
+  const cancelled = await cancelPendingApproval(deps, task);
+  const candidates = await findCandidates(deps.registry, {
+    skill,
+    requestedAgentId,
+    max,
+    excluded: task.excluded,
+  });
+
+  const changed = Object.entries(edit)
+    .filter(([, v]) => v !== undefined)
+    .map(([k]) => k);
+  if (cancelled)
+    await record(deps, id, {
+      type: "approval.cancelled",
+      detail: "task edited",
+    });
+  await record(deps, id, { type: "task.edited", detail: changed.join(", ") });
+  const updated = await record(deps, id, suggestedEvent(candidates), {
+    ...CHOOSING,
+    prompt: edit.prompt ?? task.prompt,
+    skill,
+    requestedAgentId,
+    maxPriceTinybars: max,
+    candidates,
+  });
+  return updated
+    ? { ok: true, task: updated, run: false }
+    : fail(404, "unknown task");
+}
+
+/** Calls the task off. Nothing is paid after this; a pending approval is cancelled. */
+export async function withdrawTask(
+  deps: TaskDeps,
+  account: AccountRecord,
+  id: string,
+): Promise<TaskResult> {
+  const task = await ownTask(
+    deps,
+    account,
+    id,
+    ["awaiting-choice", "queued", "awaiting-approval", "blocked", "failed"],
+    "withdraw",
+  );
+  if (isResult(task)) return task;
+  if (await cancelPendingApproval(deps, task))
+    await record(deps, id, { type: "approval.cancelled", detail: "withdrawn" });
+  const updated = await record(
+    deps,
+    id,
+    { type: "task.withdrawn" },
+    { status: "withdrawn", approvalUrl: null },
+  );
+  return updated
+    ? { ok: true, task: updated, run: false }
+    : fail(404, "unknown task");
 }
 
 /** What the check reads: who is paid, how much at most, and the task itself. */
 export function taskCheckText(listing: AgentListing, task: TaskRecord): string {
-  const price = formatAmount({
-    asset: { kind: "HBAR" },
-    units: taskCeiling(listing, task),
-  });
-  return `Payment for a task. Worker agent "${listing.name}" (${listing.id}) is paid at most ${price} to account ${listing.payTo} to do this task:\n\n${task.prompt}`;
+  return `Payment for a task. Worker agent "${listing.name}" (${listing.id}) is paid at most ${hbar(taskCeiling(listing, task))} to account ${listing.payTo} to do this task:\n\n${task.prompt}`;
 }
 
 function hooksFor(deps: TaskDeps, taskId: string): WorkerHooks {
@@ -274,6 +534,7 @@ async function activeWorker(
   deps: TaskDeps,
   task: TaskRecord,
 ): Promise<AgentListing | null> {
+  if (!task.workerId) return null;
   const listing = await deps.registry.get(task.workerId);
   return listing?.role === "worker" && listing.status === "active"
     ? listing
@@ -325,6 +586,8 @@ export async function resumeTask(
   task: TaskRecord,
   outcome: CallbackOutcome,
 ): Promise<RunResult | null> {
+  // The requester may have withdrawn, edited or searched again since.
+  if (task.status !== "awaiting-approval") return null;
   const listing = await activeWorker(deps, task);
   if (!listing) {
     // Never pay a worker that was suspended while the human was approving.

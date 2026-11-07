@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 /**
  * The agent-to-agent flow over HTTP, against the production build in demo
  * mode: an outside agent finds Kavach402, gets an account, finds a worker,
- * proposes a task and polls until the answer is there. The check, payment and
+ * proposes a task, accepts a suggested worker and polls until the answer is there. The check, payment and
  * worker call run after the 202 response, inside Next.
  */
 test.describe("the task API", () => {
@@ -41,8 +41,20 @@ test.describe("the task API", () => {
         maxPriceTinybars: "20000000",
       },
     });
-    expect(proposed.status()).toBe(202);
+    // Kavach402 suggests; nothing is paid until the requester decides.
+    expect(proposed.status()).toBe(201);
     const { task } = await proposed.json();
+    expect(task.status).toBe("awaiting-choice");
+    expect(task.candidates[0]).toMatchObject({
+      workerId: "kavach-scribe",
+      recommended: true,
+    });
+
+    const accepted = await request.post(`/api/tasks/${task.id}/accept`, {
+      headers: auth,
+      data: { workerId: "kavach-scribe" },
+    });
+    expect(accepted.status()).toBe(202);
 
     // Poll for progress until the task leaves the running states.
     const poll = async () =>
@@ -81,7 +93,8 @@ test.describe("the task API", () => {
     );
     expect(current.events.map((e: { type: string }) => e.type)).toEqual(
       expect.arrayContaining([
-        "worker.matched",
+        "workers.suggested",
+        "worker.accepted",
         "check.started",
         "worker.called",
         "task.completed",

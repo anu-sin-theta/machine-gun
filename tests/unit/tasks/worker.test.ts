@@ -4,8 +4,10 @@ import {
 } from "@x402/core/http";
 import type { SchemeNetworkClient } from "@x402/core/types";
 import { describe, expect, it } from "vitest";
+import { DEMO_PAYMENT } from "@/marketplace/challenge";
 import type { AgentListing } from "@/marketplace/types";
 import {
+  createDemoWorkerPorts,
   createLiveWorkerPorts,
   type TaskRecord,
   taskCeiling,
@@ -244,5 +246,96 @@ describe("createLiveWorkerPorts", () => {
         amount: 3_000_000n,
       }),
     ).toEqual({});
+  });
+});
+
+describe("createDemoWorkerPorts with a third-party worker", () => {
+  const demo = (s: Server = {}, listing: AgentListing = WORKER) => {
+    const w = worker(s);
+    const log: Array<string | null> = [];
+    return {
+      ...createDemoWorkerPorts(
+        listing,
+        TASK,
+        {
+          started: async () => {
+            log.push("started");
+          },
+          answered: async (t) => {
+            log.push(t);
+          },
+        },
+        () => 1_700_000_000_000,
+        { network: NETWORK, safeFetch: w.fetchImpl },
+      ),
+      seen: w.seen,
+      log,
+    };
+  };
+
+  it("probes the real 402 with the same payee and price rules as live mode", async () => {
+    expect(await demo().probe.challenge("x")).toEqual({
+      payTo: WORKER.payTo,
+      amount: 3_000_000n,
+    });
+    await expect(
+      demo({ payTo: "0.0.9999" }).probe.challenge("x"),
+    ).rejects.toMatchObject({ kind: "RESOURCE_NOT_PAYABLE" });
+    await expect(
+      demo({ amount: "9000000" }).probe.challenge("x"),
+    ).rejects.toMatchObject({ kind: "RESOURCE_NOT_PAYABLE" });
+  });
+
+  it("sends the task with the demo payment marker, never a signed payment, and hands over the answer", async () => {
+    const p = demo();
+    const r = await p.payer.pay("x", {
+      payTo: WORKER.payTo,
+      amount: 3_000_000n,
+    });
+    expect(r.transactionId).toMatch(/^demo-unsettled@/);
+    expect(p.log).toEqual(["started", "Done."]);
+    const sent = p.seen.at(-1) as Request;
+    expect(sent.headers.get("PAYMENT-SIGNATURE")).toBe(DEMO_PAYMENT);
+    expect(await sent.json()).toMatchObject({ model: "acme-large" });
+  });
+
+  it("fails on an error status, an unreachable worker, or a refused endpoint", async () => {
+    await expect(
+      demo({ paid: () => new Response("{}", { status: 500 }) }).payer.pay("x", {
+        payTo: WORKER.payTo,
+        amount: 1n,
+      }),
+    ).rejects.toMatchObject({ kind: "PAYMENT_FAILED" });
+    const down = createDemoWorkerPorts(
+      WORKER,
+      TASK,
+      { started: async () => {}, answered: async () => {} },
+      () => 0,
+      {
+        network: NETWORK,
+        safeFetch: (async () => {
+          throw new Error("refused");
+        }) as typeof fetch,
+      },
+    );
+    await expect(
+      down.payer.pay("x", { payTo: WORKER.payTo, amount: 1n }),
+    ).rejects.toMatchObject({ kind: "PAYMENT_FAILED", message: "refused" });
+    const bad = demo({}, { ...WORKER, endpoint: "https://10.0.0.1/v1" });
+    await expect(
+      bad.payer.pay("x", { payTo: WORKER.payTo, amount: 1n }),
+    ).rejects.toMatchObject({ message: "worker endpoint refused" });
+  });
+
+  it("still refuses a third-party worker when no remote access is configured", async () => {
+    const p = createDemoWorkerPorts(
+      WORKER,
+      TASK,
+      { started: async () => {}, answered: async () => {} },
+      () => 0,
+    );
+    await expect(p.probe.challenge("x")).rejects.toMatchObject({
+      message: "demo mode runs only the built-in worker",
+    });
   });
 });

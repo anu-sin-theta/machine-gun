@@ -213,6 +213,8 @@ const toTask = (row: TaskRow): TaskRecord => ({
   ...row,
   maxPriceTinybars: BigInt(row.maxPriceTinybars),
   status: row.status as TaskRecord["status"],
+  candidates: row.candidates as TaskRecord["candidates"],
+  excluded: row.excluded as string[],
   warnings: row.warnings as TaskRecord["warnings"],
   events: row.events as TaskRecord["events"],
 });
@@ -252,9 +254,15 @@ class PgTasks implements TasksRepo {
 
   async update(id: string, patch: TaskPatch): Promise<TaskRecord | null> {
     if (Object.keys(patch).length === 0) return this.get(id);
+    const { maxPriceTinybars, ...rest } = patch;
     const rows = await this.db
       .update(tasks)
-      .set(patch)
+      .set({
+        ...rest,
+        ...(maxPriceTinybars !== undefined && {
+          maxPriceTinybars: maxPriceTinybars.toString(),
+        }),
+      })
       .where(eq(tasks.id, id))
       .returning();
     return rows[0] ? toTask(rows[0]) : null;

@@ -19,7 +19,11 @@ import {
   type MerchantPayer,
   type ResourceProbe,
 } from "@/agent/types";
-import { chatCompletionsUrl, readChallenge } from "@/marketplace/challenge";
+import {
+  chatCompletionsUrl,
+  DEMO_PAYMENT,
+  readChallenge,
+} from "@/marketplace/challenge";
 import { validateEndpoint } from "@/marketplace/endpoint";
 import { scribeReply } from "@/marketplace/scribe";
 import type { AgentListing } from "@/marketplace/types";
@@ -59,19 +63,26 @@ export interface LiveWorkerConfig {
   scheme?: SchemeNetworkClient;
 }
 
-export function createLiveWorkerPorts(
-  config: LiveWorkerConfig,
+/**
+ * The worker's endpoint and the probe of its unpaid 402, shared by live mode
+ * and by demo mode's calls to third-party workers, so both enforce the same
+ * payee and price rules.
+ */
+function remoteWorker(
+  config: Pick<
+    LiveWorkerConfig,
+    "network" | "safeFetch" | "allowLocalEndpoints"
+  >,
   listing: AgentListing,
   task: TaskRecord,
-  hooks: WorkerHooks,
-): WorkerPorts {
+) {
   const endpoint = validateEndpoint(listing.endpoint, {
     allowLocalHttp: config.allowLocalEndpoints ?? false,
   });
   const url = endpoint.ok ? chatCompletionsUrl(endpoint.url) : null;
-  const request = (): RequestInit => ({
+  const request = (headers: Record<string, string> = {}): RequestInit => ({
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: chatBody(listing, task),
   });
 
@@ -95,6 +106,16 @@ export function createLiveWorkerPorts(
       return { payTo: read.payTo, amount: read.amount };
     },
   };
+  return { url, request, probe };
+}
+
+export function createLiveWorkerPorts(
+  config: LiveWorkerConfig,
+  listing: AgentListing,
+  task: TaskRecord,
+  hooks: WorkerHooks,
+): WorkerPorts {
+  const { url, request, probe } = remoteWorker(config, listing, task);
 
   const payer: MerchantPayer = {
     async pay(_resourceUrl, challenge) {
@@ -141,15 +162,55 @@ export function createLiveWorkerPorts(
 }
 
 /**
- * Demo mode: no money moves. Only the built-in worker runs, called in-process;
- * a registered third-party worker would want real payment.
+ * Demo mode: no money moves. The built-in worker runs in-process. A
+ * third-party worker is called over HTTP when `remote` is given: its unpaid
+ * 402 is probed and checked exactly as in live mode (payee, price, maximum),
+ * then the task is sent with `DEMO_PAYMENT` in place of a signed payment.
  */
 export function createDemoWorkerPorts(
   listing: AgentListing,
   task: TaskRecord,
   hooks: WorkerHooks,
   now: () => number,
+  remote?: Pick<
+    LiveWorkerConfig,
+    "network" | "safeFetch" | "allowLocalEndpoints"
+  >,
 ): WorkerPorts {
+  if (!listing.builtIn && remote) {
+    const { url, request, probe } = remoteWorker(remote, listing, task);
+    return {
+      probe,
+      payer: {
+        async pay() {
+          if (!url)
+            throw new AgentError("PAYMENT_FAILED", "worker endpoint refused");
+          await hooks.started();
+          let res: Response;
+          try {
+            res = await remote.safeFetch(
+              url,
+              request({ "PAYMENT-SIGNATURE": DEMO_PAYMENT }),
+            );
+          } catch (e) {
+            throw new AgentError(
+              "PAYMENT_FAILED",
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+          if (!res.ok)
+            throw new AgentError(
+              "PAYMENT_FAILED",
+              `worker returned ${res.status}`,
+            );
+          await hooks.answered(readAnswer(await res.json().catch(() => null)));
+          return {
+            transactionId: `demo-unsettled@${Math.floor(now() / 1000)}`,
+          };
+        },
+      },
+    };
+  }
   return {
     probe: {
       async challenge() {

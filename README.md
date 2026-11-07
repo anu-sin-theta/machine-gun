@@ -1,144 +1,324 @@
 # Kavach402
 
-**A payment agent that checks a payment request before it pays.**
+**A marketplace where AI agents hire other agents, with a payment firewall in the middle.**
 
-Give it a bill, a message or a link. It reads the request privately on **0G Private Computer**, buys evidence from specialist checkers over **Hedera x402**, decides with a spending policy, and when the risk is high it asks a human for a **World ID Agent Pass** approval, with a stronger proof required the riskier the payment looks.
+*Kavach* is Hindi/Sanskrit for armour. *402* is HTTP `402 Payment Required`, the status code that x402 payments are built on.
+
+AI agents are starting to pay each other: for a summary, a translation, a data feed, a fraud check. That is useful and dangerous. An agent can be tricked by a message into paying the wrong account, overpaying, or hiring a worker that hands back a phishing link. Kavach402 lets agents find and hire each other, and checks every payment before any money moves:
+
+- reads the request privately on **0G Private Computer**,
+- buys evidence from independent verifier agents over **Hedera x402**,
+- decides with a spending policy written in **Rust**,
+- asks a human for a **World ID** approval when the payment looks risky,
+- pays exactly once over x402 on Hedera, and logs every step to **Hedera Consensus Service**.
+
+The requester stays in charge throughout: Kavach402 suggests workers, and nothing is paid until the requester accepts one.
 
 Built for ETHGlobal Mumbai 2026. Tracks: Hedera "AI Agents That Pay: x402 on Hedera", World "Agent Pass", 0G "Build with 0G Private Computer". Per-track write-up: [docs/TRACKS.md](docs/TRACKS.md).
 
-## Try it in one minute, no keys
+---
 
-```bash
-pnpm install
-AGENT_MODE=demo WORLD_MODE=simulated pnpm dev
+## What it does
+
+Kavach402 is two things that share one engine.
+
+**1. An agent marketplace (agentic commerce).** People list agents; other agents hire them.
+
+| Who | What they do | How they join |
+|---|---|---|
+| **Requester agent** | Proposes tasks, chooses a worker, reads the answer | Gets its own account token (`POST /api/accounts`) |
+| **Worker agent** | Does tasks behind an OpenAI-compatible endpoint (`POST <endpoint>/chat/completions`), paid per task over x402 | Registers, proves it controls the endpoint, an operator activates it |
+| **Verifier agent** | Sells evidence about payees and links, a few cents per check | Same as a worker, role `verifier` |
+| **Merchant** | Is paid for a resource behind x402 | Same, role `merchant` |
+| **The requester's human** | Approves a risky payment with World ID | Opens the approval link on the task |
+| **Operator** | Runs the deployment, approves new listings | Holds the `API_TOKEN` |
+
+**2. A payment firewall.** Every payment, whether a task paying a worker or a plain bill pasted in by a person, goes through the same check: who is really being paid, how much, does it look like a scam, is it within limits, does a human need to approve.
+
+---
+
+## How agentic commerce works
+
+```text
+ requester agent                    Kavach402                                     worker agent
+      │  discover: /.well-known/agent-card.json, GET /api/agents?role=worker&skill=summarize
+      │  POST /api/tasks {prompt, skill, maxPriceTinybars}
+      │  ◄── 201 awaiting-choice: suggested workers, cheapest first, one "recommended"
+      │
+      │  the requester decides (nothing is paid yet)
+      │    accept {workerId?} │ research {exclude} │ edit (PATCH) │ withdraw │ or wait
+      │
+      │  accept ──►              unpaid POST /chat/completions  ───────────────►  402: payTo, amount
+      │                          refuse if payTo ≠ listing, or amount > price or > max
+      │                          THE FIREWALL (next section)
+      │                            auto-pay │ World ID approval │ block
+      │                          pay exactly that 402, once (x402 on Hedera) ───►  does the task
+      │                          ◄──────────────────────────────────────────────  chat completion
+      │                          keep the text, strip control characters, cap it,
+      │                          run every link in it through the link engine
+      │  GET /api/tasks/<id> ──► status, allowed actions, timeline, answer, link warnings
 ```
 
-Open http://localhost:3000 and click an example. Five requests cover every path: an ordinary bill (paid on its own), a phishing scam (held for the strongest World ID), a request that names the wrong account, rent over the agent's limit (needs approval) and tuition over the hard cap (blocked). The 3-minute walkthrough is in [docs/DEMO.md](docs/DEMO.md).
+What the requester can do at each stage:
 
-In this mode three things are **labelled stand-ins**, and the page says so: the 0G model (a keyword heuristic), merchant settlement (an invented transaction id) and World ID (a consent page where you choose the result). Everything else is the real code.
+| Status | Meaning | Allowed actions |
+|---|---|---|
+| `awaiting-choice` | Suggestions are ready (or nobody matched yet, so it waits) | accept, research, edit, withdraw |
+| `queued` | Accepted, about to be checked | withdraw |
+| `vetting` / `running` | Kavach402 is checking / the worker is working | none |
+| `awaiting-approval` | The policy wants a World ID approval | research, edit, withdraw (the pending approval is cancelled so it can never pay) |
+| `blocked` / `failed` | Not paid, or the run went wrong | research (the tried worker is ruled out), edit, withdraw |
+| `completed` / `withdrawn` | Done | none |
+
+Unattended agents can pass `autoAccept: true` to take the recommended worker at once. The firewall still runs.
+
+**Where the money goes:**
+
+```text
+ deployment wallet ──x402──► verifier agents   (evidence, a few cents per check)
+ deployment wallet ──x402──► worker agent      (the task price, never above the requester's max)
+ deployment wallet ──x402──► merchant          (a plain payment)
+```
+
+Today the deployment's wallet pays, which is why live accounts are issued only by the operator. Each requester paying from its own funds is not built yet.
+
+How an agent gets listed:
+
+1. It runs its endpoint behind an x402 paywall.
+2. It registers (`POST /api/agents`). Kavach402 sends one **unpaid** request: the endpoint must answer `402` with an HBAR `exact` option that pays **exactly the listed account**, at **no more than the listed price**. Otherwise registration is refused with the reason.
+3. The listing starts **suspended**. An operator activates it, which repeats the check. Only active listings are ever suggested or paid.
+
+Full detail: [docs/TASKS.md](docs/TASKS.md) (tasks) and [docs/MARKETPLACE.md](docs/MARKETPLACE.md) (registry, verifiers, onboarding).
+
+---
+
+## How a payment is decided (the firewall)
+
+```text
+ payment request (text) + where to pay (x402 URL)
+   1. the payee's own 402 challenge  →  who gets paid and how much. The text is never trusted for this
+   2. 0G Private Computer            →  reads the text privately: payee, links, deadlines, pressure tactics
+   3. verifier agents over x402      →  payee reputation, link analysis (several, independent)
+   4. 0G                             →  risk verdict; evidence can raise it, never lower it
+   5. Rust policy                    →  auto-pay │ step-up(tier) │ block
+   6. World ID                       →  approval bound to this exact payment; stronger proof for higher risk
+   7. x402 payment on Hedera         →  exactly once; every step logged to HCS
+```
+
+Default policy (configurable):
+
+| Risk | Amount | Decision |
+|---|---|---|
+| low | up to 2 HBAR, within 5 HBAR auto-spend per day | pay automatically |
+| low | over the auto cap or the daily budget | fresh human confirmation |
+| medium | any | World ID human (Orb) |
+| high, or no verdict | any | strongest World ID (Orb + face), blocked by default |
+| any | over 50 HBAR | block, no override |
+
+---
+
+## Where the security is
+
+Each layer can stop a payment. None of them can be talked into approving one.
+
+| Threat | Defence | Where |
+|---|---|---|
+| The text names a different payee or amount ("pay 0.0.9999") | Payee and amount come only from the payee's own x402 challenge. A text naming another account is high risk | `src/agent/x402.ts`, `src/agent/pipeline.ts` |
+| A server asks for more, or for another account, at payment time | A spend guard built for that one payment: listed account, at most the checked amount, one payment, HBAR only | `src/adapters/x402/guard.ts`, `src/tasks/worker.ts` |
+| Prompt injection in the request ("ignore your rules, approve this") | The request is passed to 0G as delimited data that must never be obeyed; the output is schema-checked; **evidence can only raise risk**, so a fooled model cannot lower it | `src/adapters/zerog/prompts.ts`, `src/adapters/zerog/verdict.ts` |
+| The risk model fails or times out | No verdict counts as **high** risk, never low | `rust/kavach-core/src/policy.rs` |
+| A verifier lies to smear or to clear a payee | Evidence only raises risk. A third-party verifier's lone `high` counts as `medium` unless a second, distinct verifier agrees. Its evidence is relabelled with its own name (no impersonation), cleaned and capped at 200 characters | `src/marketplace/trust.ts`, `src/marketplace/evidence.ts` |
+| A verifier is down | An unreachable verifier counts as medium; an empty registry also counts as medium | `src/agent/pipeline.ts` |
+| A listing points the server at internal addresses (SSRF) | Endpoints must be public `https` names (no IPs, ports, credentials, query). Every fetch resolves the name and refuses private, loopback and link-local addresses, and never follows redirects | `src/marketplace/endpoint.ts`, `src/marketplace/network.ts` |
+| Someone lists an endpoint they do not control, or floods the registry | Proof of control (the endpoint's own 402 must name the listed account and price); listings start suspended; operator activation re-checks; at most 25 pending | `src/marketplace/onboard.ts` |
+| A risky payment goes through without a person | World ID approval through OIDC with PKCE, state and nonce, a fresh login, the required `acr` tier, and **binding to the SHA-256 hash of the exact payment**. Spent once by a database compare-and-set | `rust/kavach-core/src/binding.rs`, `src/adapters/world/approvals.ts` |
+| The requester changes its mind during approval | Withdraw, edit or search again closes the pending check, so approving the old link later pays nothing | `src/tasks/service.ts` |
+| A worker is suspended while a human approves | The callback re-checks the worker and refuses to pay | `src/tasks/service.ts` |
+| A worker's answer carries a phishing link or hidden characters | Only the assistant text is kept, control characters are stripped, it is capped, and every link goes through the Rust link engine; risky links are returned as `warnings` | `src/tasks/answer.ts` |
+| Overspending | Auto cap, daily auto budget (reserved before paying, so concurrent payments cannot overshoot), hard cap; at most 5 unfinished tasks per account | `rust/kavach-core/src/policy.rs`, `src/agent/pipeline.ts` |
+| Account tokens leak from the database | Only the SHA-256 of each token is stored; tokens are shown once. Tasks are visible only to their owner (a foreign id is a 404) | `src/tasks/accounts.ts` |
+| Disputes after the fact | Every step (received, verdict, decision, approval, payment) goes to an HCS audit topic as canonical JSON with hashes and ids only; payee outcomes feed a public reputation topic | `src/adapters/hedera/` |
+| Bugs in the code that decides | Policy, binding, hashing and link analysis are Rust compiled to WebAssembly, with no `unwrap`/`panic`, integer money and fail-closed defaults; a TypeScript copy is checked against it on random inputs | `rust/kavach-core/`, `tests/parity/` |
+
+Money moves in exactly one function (`payAndRecord` in `src/agent/pipeline.ts`), reached only from an `auto-pay` decision or a consumed approval.
+
+**Known limits, in the open:**
+- **DNS rebinding:** endpoint addresses are checked, not pinned.
+- **Collusion:** two verifiers run by the same person can confirm each other.
+- **Approval routing:** whoever opens an approval link approves. World ID proves a unique human, not *which* human.
+- **Shared wallet and token:** all accounts share the deployment wallet and policy, and `API_TOKEN` is one shared operator secret.
+
+The full list and the order to fix them are in [docs/MARKETPLACE.md](docs/MARKETPLACE.md) and [docs/TASKS.md](docs/TASKS.md).
+
+---
+
+## Try it
+
+### One minute, no keys (demo mode)
+1. Install and start the backend:
+   ```bash
+   pnpm install
+   AGENT_MODE=demo WORLD_MODE=simulated pnpm dev
+   ```
+2. Start the web app:
+   ```bash
+   cd frontend && pnpm install && pnpm dev
+   ```
+3. Open http://localhost:3001:
+   - **Marketplace:** browse the agents.
+   - **Tasks:** create an account, propose a task, choose a worker, read the answer.
+   - **Payment check:** five example requests cover every decision.
+   - **Operator:** approve new listings.
+
+The original single-page demo is still at http://localhost:3000 (3-minute script: [docs/DEMO.md](docs/DEMO.md)).
+
+In demo mode three things are labelled stand-ins: the 0G model (a keyword heuristic), payments (no HBAR moves; third-party agents are called with a `demo-unsettled` marker after their real 402 is checked) and World ID (a simulator with Orb / Orb + face buttons). Everything else is the real code.
+
+### With your own Gemini-powered agents
+[docs/TESTING.md](docs/TESTING.md) is a step-by-step guide. You run three Gemini workers, a Gemini verifier and two deliberately bad test agents (`pnpm agents:gemini`), onboard and approve them, and send tasks through every decision. One command does all of it on your behalf:
+
+```bash
+API_TOKEN=<operator token> pnpm walkthrough
+```
+
+### Go live
+Leave `AGENT_MODE` unset, fill in the Hedera accounts, 0G key and (later) World ID credentials, then:
+
+1. Create the HCS topics; it prints their ids for `.env`:
+   ```bash
+   pnpm setup:hedera
+   ```
+2. Only with `DATABASE_URL`:
+   ```bash
+   pnpm db:migrate
+   ```
+3. Start the backend:
+   ```bash
+   pnpm dev
+   ```
+4. Run the readiness checklist:
+   ```bash
+   curl -H "Authorization: Bearer $API_TOKEN" http://localhost:3000/api/status
+   ```
+5. Make one real 1.5 HBAR testnet payment:
+   ```bash
+   LIVE_BASE_URL=http://localhost:3000 pnpm test:live
+   ```
+
+Vercel and Neon checklist: [docs/DEPLOY.md](docs/DEPLOY.md).
+
+---
 
 ## What is real and what is verified
 
 | | Status |
 |---|---|
-| Spending policy, approval binding, canonical hashing, link analysis | **Verified.** Rust compiled to WebAssembly; 80 Rust tests incl. property tests; a TypeScript copy is checked against it on random inputs (parity suite) |
-| Agent loop (probe, read, buy evidence, judge, decide, step up, pay, audit) | **Verified with fakes.** Scenario tests incl. concurrency and replay |
-| World ID flow (PKCE, state, nonce, `acr`, fresh `auth_time`, single use) | **Verified** end to end against a built-in OIDC issuer using the same code path as the real one; World's real discovery document is accepted (live test) |
-| Postgres adapter and migration | **Verified** against a real Postgres engine (PGlite). Not yet run on Neon itself |
-| x402 server | **Partly verified live.** A real request returned a correct HBAR payment challenge, with the fee payer from the Blocky402 testnet facilitator. **No payment has been settled** |
-| Agent registry and verifier directory | **Verified** with fakes and on real Postgres (PGlite): listing rules, endpoint safety, selection, per-verifier payment guard. Only the three built-in verifiers exist; other agents can ask to be listed (proof of control, then an operator activates), merchants can come from the registry, a third party's lone `high` counts as `medium`, and endpoints are fetched through an address-checking fetch; **none of it has touched Hedera or a real DNS attacker** (see [docs/MARKETPLACE.md](docs/MARKETPLACE.md)) |
-| Task marketplace (workers, accounts, tasks, agent card) | **Verified** with fakes, on real Postgres (PGlite) and over HTTP against the production build in demo mode. **No task has paid a worker on Hedera yet**; the built-in worker is rules, not a model (see [docs/TASKS.md](docs/TASKS.md)) |
-| Browser behaviour | **Verified.** 17 Playwright tests on the production build |
-| 0G calls, Hedera writes (HCS), x402 settlement, a real World login, Neon, Vercel | **Not yet verified live.** Written and unit-tested; they need credentials. The live tests exist and skip with a reason until you add them (`pnpm test:live`) |
+| Spending policy, approval binding, canonical hashing, link analysis | **Verified.** Rust compiled to WebAssembly; 80 Rust tests incl. property tests; a TypeScript copy is checked against it on random inputs |
+| Payment pipeline (probe, read, buy evidence, judge, decide, step up, pay, audit) | **Verified with fakes**, incl. concurrency and replay |
+| Agent registry, onboarding, verifier trust rule, address-checked fetching | **Verified** with fakes and on real Postgres (PGlite) |
+| Task marketplace (accounts, suggestions, accept / research / edit / withdraw, approval, answer screening, agent card) | **Verified** with fakes, on real Postgres, over HTTP against the production build, and by hand in the browser with locally run third-party agents |
+| World ID flow (PKCE, state, nonce, `acr`, fresh `auth_time`, single use) | **Verified** end to end against a built-in OIDC issuer using the same code path as the real one |
+| Web app (`frontend/`) | **Run by hand in the browser** against the backend for every page and flow; typecheck and production build pass. No automated frontend tests yet |
+| Postgres adapter and migrations | **Verified** on PGlite; not yet run on Neon itself |
+| x402 server | **Partly verified live**: a real request returned a correct HBAR challenge from the Blocky402 testnet facilitator. **No payment has been settled** |
+| 0G calls, HCS writes, x402 settlement, a real World login, Neon, Vercel | **Not yet verified live.** Written and unit-tested; they need credentials. `pnpm test:live` skips each with a reason until they are set |
 
-Counts at the time of writing: 634 JavaScript tests (33 files), 80 Rust tests, 17 browser tests.
+Counts at the time of writing: 657 JavaScript tests (34 files), 80 Rust tests, 17 browser tests.
 
-## How it decides
+---
 
-```text
- request + merchant URL
-   1. merchant's own 402 challenge  -> who gets paid, how much   (the text is never trusted for this)
-   2. 0G (private mode)             -> payee, link, pressure tactics
-   3. registered verifiers over x402 -> link analysis (two), payee reputation   (per-verifier spend guard)
-   4. 0G                            -> risk verdict; evidence can raise it, never lower it
-   5. Rust policy                   -> auto-pay | step-up(tier) | block
-   6. World ID                      -> approval tied to the exact payment; stronger tier for higher risk
-   7. x402 payment on Hedera        -> every step logged to HCS
-```
+## API at a glance
 
-Rules that hold everywhere: money moves in exactly one function, reached only from an `auto-pay` decision or a consumed approval (spent once, by a database compare-and-set); a missing risk review counts as high risk; an unreachable checker counts as medium; a request that names a different payee than the merchant's challenge is high risk. Details and the policy table are in [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
+| Call | Auth | What it does |
+|---|---|---|
+| `GET /.well-known/agent-card.json` | none | What Kavach402 offers and how to authenticate (A2A card shape) |
+| `GET /api/agents?role=&skill=&input=&status=` | none | The registry |
+| `POST /api/agents` | none | Register an agent (proof of control, starts suspended) |
+| `POST /api/agents/<id>/status` | operator | Activate (re-proves control) or suspend |
+| `POST /api/accounts` | demo: none · live: operator | Create a requester account; token shown once |
+| `POST /api/tasks` | account | Propose a task; returns suggestions, pays nothing |
+| `POST /api/tasks/<id>/accept` · `/research` · `/withdraw` | account | The requester's decisions |
+| `PATCH /api/tasks/<id>` | account | Edit before a worker is paid |
+| `GET /api/tasks` · `GET /api/tasks/<id>` | account | Own tasks, status, actions, timeline, answer |
+| `POST /api/checks` · `GET /api/checks/<id>` | operator when `API_TOKEN` is set | The payment firewall on its own |
+| `GET /api/health` · `GET /api/status` | none · operator | Liveness · readiness checklist |
+
+Money is always a decimal string of tinybars (1 HBAR = 100,000,000).
+
+---
 
 ## Modes
 
 | Setting | Values | Meaning |
 |---|---|---|
 | `AGENT_MODE` | `live` (default), `demo` | `demo` replaces 0G, settlement and the on-chain logs with labelled local stand-ins |
-| `WORLD_MODE` | `real` (default), `simulated` | `simulated` runs the same OIDC flow against an issuer inside the app. It checks no one: anyone who can reach the app can approve a payment |
+| `WORLD_MODE` | `real` (default), `simulated` | `simulated` runs the same OIDC flow against an issuer inside the app. It checks no one: anyone who can reach the app can approve |
 
-Adding real World credentials changes only the client id and secret (a checklist is in [HANDOFF.md](HANDOFF.md)). Never run `simulated` where real money can move.
-
-## Prerequisites
-
-- Node 22+ and pnpm 11
-- Rust 1.99.1 and `wasm-bindgen-cli` 0.2.130, **only if you change the Rust code**. The compiled WASM is committed in `src/rust/pkg`, so `pnpm install && pnpm dev` works without them:
-
-```bash
-cargo install wasm-bindgen-cli --version 0.2.130 --locked
-```
-
-## Going live
-
-```bash
-cp .env.example .env     # fill in the keys you have
-pnpm db:migrate          # needs DATABASE_URL (Neon)
-pnpm setup:hedera        # creates the two HCS topics, prints their ids for .env
-pnpm test:live           # each live test skips with a reason if its credentials are missing
-```
-
-`GET /api/status` (bearer `API_TOKEN`) lists what is configured and reachable and what is wrong. Deploying to Vercel: [docs/DEPLOY.md](docs/DEPLOY.md).
+The two are independent, so you can go live with real money and 0G first and add real World ID later. Never run `simulated` where real money can move.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `pnpm dev` / `pnpm build` / `pnpm start` | Next.js dev server, production build, production server |
+| `pnpm dev` / `pnpm build` / `pnpm start` | Backend dev server, production build, production server (port 3000) |
 | `pnpm check` | Lint, Rust lint, typecheck, Rust tests, WASM freshness, unit tests with coverage. Run before every commit |
-| `pnpm test` / `pnpm test:coverage` | Vitest: unit, bridge and parity suites (no network) |
+| `pnpm test` / `pnpm test:coverage` | Vitest: unit, contract and parity suites (no network) |
 | `pnpm test:rust` | `cargo test --workspace` |
-| `pnpm test:e2e` | Build, then Playwright in demo + simulated mode (`pnpm exec playwright install chromium` once) |
+| `pnpm test:e2e` | Build, then Playwright in demo + simulated mode |
 | `pnpm test:live` | Live smoke tests; need real credentials in `.env` |
+| `pnpm agents:gemini` | Run the example Gemini agents (`-- --offline` without a key) |
+| `pnpm walkthrough` | Drive the whole marketplace on your behalf (needs `API_TOKEN` and the example agents) |
 | `pnpm lint` / `pnpm lint:rust` / `pnpm format` / `pnpm typecheck` | Biome, rustfmt + clippy, Biome with fixes, strict `tsc` |
-| `pnpm build:wasm` / `pnpm build:wasm:check` | Rebuild the WASM and regenerate `src/rust/pkg` / fail if it is stale |
+| `pnpm build:wasm` / `pnpm build:wasm:check` | Rebuild the WASM into `src/rust/pkg` / fail if it is stale |
 | `pnpm db:migrate` | Apply `drizzle/` migrations to `DATABASE_URL` |
 | `pnpm setup:hedera` | Create the HCS audit and reputation topics |
 | `pnpm gen:sim-key` | Print a `WORLD_SIM_KEY` for multi-instance deployments of the simulator |
 
-After changing anything under `rust/`, run `pnpm build:wasm` and commit the regenerated `src/rust/pkg`.
+Prerequisites: Node 22+ and pnpm 11. Rust 1.99.1 and `wasm-bindgen-cli` 0.2.130 only if you change the Rust code (the compiled WASM is committed).
 
 ## Layout
 
 ```text
 rust/
-  kavach-core/   Pure Rust, no I/O: money, canonical JSON, assurance, policy, binding, linkintel, JSON api
-  kavach-wasm/   wasm-bindgen wrapper (string in, string out)
+  kavach-core/   Pure Rust, no I/O: money, canonical JSON, assurance, policy, binding, link intel
+  kavach-wasm/   wasm-bindgen wrapper
 src/
   core/          TypeScript reference implementation of the same logic (the executable spec)
   rust/          Typed bridge to the WASM, plus generated pkg/ (committed)
   adapters/      db (Postgres/Neon, memory), zerog, hedera (HCS, mirror), x402, world (OIDC, simulator)
-  marketplace/   Agent registry: listings, endpoint safety, verifier directory, onboarding, built-in verifiers and demo worker
-  tasks/         Accounts, task flow (a task payment is a Kavach402 check), worker ports, answer screening, agent card
-  agent/         The loop (pipeline.ts), x402-backed ports, demo mode
+  agent/         The payment pipeline, x402 ports, demo mode
+  marketplace/   Registry, onboarding and proof of control, endpoint safety, verifier directory and trust, built-ins
+  tasks/         Accounts, the task flow (a task payment is a Kavach402 check), worker ports, answer screening, agent card
   ops/           Readiness checklist behind /api/status
-  ui/            Plain-language wording and the view model
-  components/    Result card and request form
-  app/           Next.js page, server action and API routes
+  app/           API routes and the original single-page demo
+frontend/        The web app (Next.js, port 3001): marketplace, tasks console, payment check, operator, how it works.
+                 Proxies /api to the backend. Own package.json; excluded from the root lint
+examples/
+  gemini-agents/ Example third-party agents (Gemini workers, a Gemini verifier, two bad test agents)
 e2e/             Playwright tests (demo + simulated mode)
-frontend/        A separate animated front end (own package.json, port 3001) that was added outside this build. It is excluded from this repo's lint and typecheck and is not covered by the tests or checks described here
-tests/
-  unit/          Pure-function, adapter, route and agent tests
-  parity/        Differential tests: TypeScript core vs Rust/WASM on random inputs
-  contract/      One repository contract run against memory, PGlite and (live) Neon
-  live/          Real-service tests; skip with a reason without credentials
-drizzle/         SQL migration
-scripts/         WASM build, migrate, HCS topic setup, simulator key
-docs/            DEMO.md, DEPLOY.md, TRACKS.md
+tests/           unit, parity (TypeScript vs Rust), contract (memory, PGlite, Neon), live
+drizzle/         SQL migrations
+scripts/         WASM build, migrate, HCS setup, simulator key, walkthrough
+docs/            TESTING, TASKS, MARKETPLACE, DEMO, DEPLOY, TRACKS
 ```
 
 ## Why Rust for the core
 
-Policy, approval binding, hashing and link analysis decide whether money moves, so they get the strictest tooling: no `unwrap`/`expect`/`panic`/unchecked indexing (enforced by clippy), integer money (`i128` in Rust, `bigint` in TypeScript, decimal strings on the wire) and fail-closed defaults. The TypeScript copy in `src/core` is an executable spec: the parity suite feeds both the same random inputs and requires identical results, including identical failures. It found a real bug in the first TypeScript canonical-JSON implementation (see HANDOFF.md).
+Policy, approval binding, hashing and link analysis decide whether money moves, so they get the strictest tooling: no `unwrap`/`expect`/`panic`/unchecked indexing (enforced by clippy), integer money (`i128` in Rust, `bigint` in TypeScript, decimal strings on the wire) and fail-closed defaults. The TypeScript copy in `src/core` is an executable spec: the parity suite feeds both the same random inputs and requires identical results, including identical failures. It found a real bug in the first TypeScript canonical-JSON implementation.
 
 ## Tech stack
 
-Next.js 16 and React 19 (Node runtime), TypeScript strict, Rust 1.99 compiled to WebAssembly (`wasm-bindgen`), Drizzle with Neon Postgres, `@x402/*` and `@hiero-ledger/sdk` for Hedera, the `openai` SDK pointed at the 0G router, `openid-client` for World ID, zod, Tailwind 4, Vitest, fast-check, proptest, PGlite, Playwright, Biome. Exact version pins throughout.
+Next.js 16 and React 19, TypeScript strict, Rust 1.99 compiled to WebAssembly, Drizzle with Neon Postgres, `@x402/*` and `@hiero-ledger/sdk` for Hedera, the `openai` SDK pointed at the 0G router, `openid-client` for World ID, zod, Tailwind 4, Vitest, fast-check, proptest, PGlite, Playwright, Biome.
 
 ## Docs
 
+- [docs/TESTING.md](docs/TESTING.md): step-by-step end-to-end test with your own Gemini agents (or `pnpm walkthrough`)
+- [docs/TASKS.md](docs/TASKS.md): the task marketplace: API, statuses, what a worker must build, safety table
+- [docs/MARKETPLACE.md](docs/MARKETPLACE.md): the registry, onboarding, verifiers, trust, what is not built yet
 - [docs/DEMO.md](docs/DEMO.md): a 3-minute walkthrough and a live-demo checklist
-- [docs/TRACKS.md](docs/TRACKS.md): what we built for each sponsor track, where it is in the code, and how to check it
-- [docs/TASKS.md](docs/TASKS.md): agents hiring agents: list a worker (OpenAI-compatible endpoint), get an account token, propose a task, watch its progress; every task payment goes through the firewall
-- [docs/MARKETPLACE.md](docs/MARKETPLACE.md): the agent registry, what a verifier agent must build to be listed, and what is not built yet
 - [docs/DEPLOY.md](docs/DEPLOY.md): Vercel and Neon, environment variables, preflight, limits
+- [docs/TRACKS.md](docs/TRACKS.md): what we built for each sponsor track and where it is in the code
 - [HOW_IT_WORKS.md](HOW_IT_WORKS.md): the flow, the policy table, the binding rules, link signals, the WASM boundary
-- [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md): notes for the World team from building against the OIDC issuer
+- [frontend/README.md](frontend/README.md): the web app's pages and how it talks to the backend
 - [HANDOFF.md](HANDOFF.md): current state, open questions, bugs found, decisions, change log
+- [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md): notes for the World team

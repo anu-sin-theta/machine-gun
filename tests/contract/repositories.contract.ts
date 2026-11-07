@@ -232,10 +232,24 @@ export function repositoryContract(
       const task = (accountId: string, createdAt = T0): TaskRecord => ({
         id: `task_${uid()}`,
         accountId,
-        workerId: "kavach-scribe",
+        workerId: null,
         prompt: "Summarise.",
+        skill: "summarize",
+        requestedAgentId: null,
         maxPriceTinybars: 9007199254740993n,
-        status: "queued",
+        status: "awaiting-choice",
+        candidates: [
+          {
+            workerId: "kavach-scribe",
+            name: "Scribe",
+            model: "m",
+            skills: ["summarize"],
+            priceTinybars: "10000000",
+            builtIn: true,
+            recommended: true,
+          },
+        ],
+        excluded: ["someone"],
         checkId: null,
         approvalUrl: null,
         output: null,
@@ -264,6 +278,11 @@ export function repositoryContract(
         const checkId = `chk_${uid()}`;
         const updated = await repos.tasks.update(older.id, {
           status: "completed",
+          workerId: "kavach-scribe",
+          maxPriceTinybars: 20_000_000n,
+          prompt: "Edited.",
+          candidates: [],
+          excluded: ["a", "b"],
           checkId,
           output: "done",
           warnings: [
@@ -276,6 +295,11 @@ export function repositoryContract(
           updatedAt: T0 + 5,
         });
         expect(updated).toMatchObject({
+          workerId: "kavach-scribe",
+          maxPriceTinybars: 20_000_000n,
+          prompt: "Edited.",
+          candidates: [],
+          excluded: ["a", "b"],
           status: "completed",
           output: "done",
           checkId,

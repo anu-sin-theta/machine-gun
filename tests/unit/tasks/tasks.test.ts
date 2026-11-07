@@ -1,19 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryRepositories } from "@/adapters/db";
 import { completeApproval } from "@/adapters/world";
+import { handleApprovalOutcome } from "@/agent/pipeline";
 import { builtInListings } from "@/marketplace/builtins";
 import { chatRequestSchema, scribe, scribeReply } from "@/marketplace/scribe";
 import type { AgentListing } from "@/marketplace/types";
 import {
   type AccountRecord,
+  acceptTask,
+  allowedActions,
   authenticate,
   createAccount,
   createDemoWorkerPorts,
+  editTask,
   hashToken,
   MAX_OPEN_TASKS,
   MAX_OUTPUT,
   proposeTask,
   readAnswer,
+  researchTask,
   resumeTask,
   runTask,
   scanAnswer,
@@ -23,6 +28,7 @@ import {
   toPublicAccount,
   toPublicTask,
   type WorkerPorts,
+  withdrawTask,
 } from "@/tasks";
 import { makeHarness, PAYEE, type Script } from "../agent/harness";
 
@@ -236,109 +242,422 @@ async function setup(
   return { h, deps, account };
 }
 
+/** Proposed and accepted at once, so the runTask tests start from a queued task. */
 const SUMMARY_TASK = {
   prompt: "Summarise: Kavach402 vets payments. It uses World ID.",
   skill: "summarize",
   maxPriceTinybars: "20000000",
+  autoAccept: true,
 };
+/** Proposed only: the requester decides. */
+const { autoAccept: _auto, ...PROPOSAL } = SUMMARY_TASK;
 
 const types = (t: { events: Array<{ type: string }> } | null) =>
   (t?.events ?? []).map((e) => e.type);
 
+/** Adds a cheaper third-party worker with the same skills as Scribe. */
+async function addWorker(
+  h: Awaited<ReturnType<typeof setup>>["h"],
+  id: string,
+  price: bigint,
+) {
+  const scribeListing = (await h.repos.agents.get(
+    "kavach-scribe",
+  )) as AgentListing;
+  await h.repos.agents.create({
+    ...scribeListing,
+    id,
+    name: id,
+    evidenceSource: id,
+    priceTinybars: price,
+    builtIn: false,
+  });
+}
+
+async function proposed(deps: TaskDeps, account: AccountRecord, input = {}) {
+  const r = await proposeTask(deps, account, { ...PROPOSAL, ...input });
+  if (!r.ok) throw new Error(r.error);
+  return r.task;
+}
+
 describe("proposeTask", () => {
-  it("queues a task with the cheapest active worker that has the skill", async () => {
+  it("suggests workers and pays nobody until the requester decides", async () => {
+    const { deps, account, h } = await setup();
+    await addWorker(h, "cheap-writer", 1_000_000n);
+    const r = await proposeTask(deps, account, PROPOSAL);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.run).toBe(false);
+    expect(r.task).toMatchObject({
+      accountId: "acct_1",
+      status: "awaiting-choice",
+      workerId: null,
+      skill: "summarize",
+      requestedAgentId: null,
+      maxPriceTinybars: 20_000_000n,
+    });
+    expect(r.task.candidates.map((c) => [c.workerId, c.recommended])).toEqual([
+      ["cheap-writer", true],
+      ["kavach-scribe", false],
+    ]);
+    expect(r.task.candidates[1]).toMatchObject({
+      priceTinybars: "10000000",
+      builtIn: true,
+      model: "kavach-scribe-1",
+    });
+    expect(types(r.task)).toEqual(["task.created", "workers.suggested"]);
+    expect(r.task.events[1]?.detail).toBe(
+      "2 worker(s); recommended cheap-writer at 0.01 HBAR",
+    );
+    expect(h.calls.pay).toHaveLength(0);
+    expect(h.calls.extract).toBe(0);
+  });
+
+  it("with autoAccept, takes the recommended worker and queues the task", async () => {
     const { deps, account } = await setup();
     const r = await proposeTask(deps, account, SUMMARY_TASK);
     if (!r.ok) throw new Error(r.error);
+    expect(r.run).toBe(true);
     expect(r.task).toMatchObject({
-      accountId: "acct_1",
-      workerId: "kavach-scribe",
       status: "queued",
-      maxPriceTinybars: 20_000_000n,
+      workerId: "kavach-scribe",
     });
-    expect(types(r.task)).toEqual(["task.created", "worker.matched"]);
-    expect(r.task.events[1]?.detail).toBe("kavach-scribe at 0.1 HBAR");
+    expect(types(r.task)).toEqual([
+      "task.created",
+      "workers.suggested",
+      "worker.accepted",
+    ]);
   });
 
-  it("prefers a cheaper worker with the same skill", async () => {
+  it("suggests only the named worker when one is asked for", async () => {
     const { deps, account, h } = await setup();
-    const scribeListing = await h.repos.agents.get("kavach-scribe");
-    await h.repos.agents.create({
-      ...(scribeListing as AgentListing),
-      id: "cheap-writer",
-      evidenceSource: "cheap-writer",
-      priceTinybars: 1_000_000n,
-      builtIn: false,
-    });
-    const r = await proposeTask(deps, account, SUMMARY_TASK);
-    expect(r.ok && r.task.workerId).toBe("cheap-writer");
-  });
-
-  it("accepts a named worker and refuses one that is not an active worker", async () => {
-    const { deps, account, h } = await setup();
-    const named = await proposeTask(deps, account, {
-      prompt: "p",
+    await addWorker(h, "cheap-writer", 1_000_000n);
+    const task = await proposed(deps, account, {
+      skill: undefined,
       agentId: "kavach-scribe",
-      maxPriceTinybars: "10000000",
     });
-    expect(named.ok).toBe(true);
+    expect(task.candidates.map((c) => c.workerId)).toEqual(["kavach-scribe"]);
+    expect(task.requestedAgentId).toBe("kavach-scribe");
 
     for (const agentId of ["kavach-link-intel", "nobody"])
       expect(
-        await proposeTask(deps, account, {
-          prompt: "p",
-          agentId,
-          maxPriceTinybars: "10000000",
-        }),
-      ).toMatchObject({ ok: false, status: 404 });
-
-    await h.repos.agents.setStatus("kavach-scribe", "suspended");
-    expect(
-      await proposeTask(deps, account, {
-        prompt: "p",
-        agentId: "kavach-scribe",
-        maxPriceTinybars: "10000000",
-      }),
-    ).toMatchObject({ ok: false, status: 404 });
+        (await proposed(deps, account, { skill: undefined, agentId }))
+          .candidates,
+      ).toEqual([]);
   });
 
-  it("refuses when no worker fits the buyer's maximum", async () => {
+  it("waits, instead of failing, when no worker fits yet", async () => {
     const { deps, account } = await setup();
-    expect(
-      await proposeTask(deps, account, {
-        ...SUMMARY_TASK,
-        maxPriceTinybars: "9999999",
-      }),
-    ).toMatchObject({ ok: false, status: 404 });
-    expect(
-      await proposeTask(deps, account, {
-        prompt: "p",
-        agentId: "kavach-scribe",
-        maxPriceTinybars: "9999999",
-      }),
-    ).toMatchObject({ ok: false, status: 422 });
-    expect(
-      await proposeTask(deps, account, { ...SUMMARY_TASK, skill: "translate" }),
-    ).toMatchObject({ ok: false, status: 404 });
+    for (const input of [
+      { maxPriceTinybars: "9999999" },
+      { skill: "translate" },
+    ]) {
+      const task = await proposed(deps, account, input);
+      expect(task).toMatchObject({ status: "awaiting-choice", candidates: [] });
+      expect(task.events[1]?.detail).toMatch(/no worker matches yet/);
+    }
+    // autoAccept with nothing to accept also waits.
+    const r = await proposeTask(deps, account, {
+      ...SUMMARY_TASK,
+      skill: "translate",
+    });
+    expect(r.ok && r.run).toBe(false);
   });
 
   it("rejects an invalid task", async () => {
     const { deps, account } = await setup();
-    for (const bad of [null, {}, { ...SUMMARY_TASK, prompt: "" }])
+    for (const bad of [null, {}, { ...PROPOSAL, prompt: "" }])
       expect(await proposeTask(deps, account, bad)).toMatchObject({
         ok: false,
         status: 400,
       });
   });
 
-  it("limits how many unfinished tasks an account may have", async () => {
+  it("limits how many unfinished tasks an account may have, including ones waiting for a choice", async () => {
     const { deps, account } = await setup();
     for (let i = 0; i < MAX_OPEN_TASKS; i++)
-      expect((await proposeTask(deps, account, SUMMARY_TASK)).ok).toBe(true);
-    expect(await proposeTask(deps, account, SUMMARY_TASK)).toMatchObject({
+      expect((await proposeTask(deps, account, PROPOSAL)).ok).toBe(true);
+    expect(await proposeTask(deps, account, PROPOSAL)).toMatchObject({
       ok: false,
       status: 429,
     });
+  });
+});
+
+describe("the requester decides", () => {
+  it("accepts the recommended worker by default, or a chosen suggestion", async () => {
+    const { deps, account, h } = await setup();
+    await addWorker(h, "cheap-writer", 1_000_000n);
+
+    const a = await proposed(deps, account);
+    const byDefault = await acceptTask(deps, account, a.id, {});
+    expect(byDefault).toMatchObject({
+      ok: true,
+      run: true,
+      task: { status: "queued", workerId: "cheap-writer" },
+    });
+
+    const b = await proposed(deps, account);
+    const chosen = await acceptTask(deps, account, b.id, {
+      workerId: "kavach-scribe",
+    });
+    expect(chosen.ok && chosen.task.workerId).toBe("kavach-scribe");
+    expect(chosen.ok && chosen.task.events.at(-1)).toMatchObject({
+      type: "worker.accepted",
+      detail: "kavach-scribe at 0.1 HBAR",
+    });
+  });
+
+  it("will not accept a worker that was not suggested, has gone, or a task in the wrong state", async () => {
+    const { deps, account, h } = await setup();
+    const task = await proposed(deps, account);
+    expect(
+      await acceptTask(deps, account, task.id, {
+        workerId: "kavach-link-intel",
+      }),
+    ).toMatchObject({ ok: false, status: 422 });
+    expect(
+      await acceptTask(deps, account, task.id, { workerId: 5 }),
+    ).toMatchObject({ ok: false, status: 400 });
+
+    await h.repos.agents.setStatus("kavach-scribe", "suspended");
+    expect(await acceptTask(deps, account, task.id, {})).toMatchObject({
+      ok: false,
+      status: 409,
+    });
+    await h.repos.agents.setStatus("kavach-scribe", "active");
+
+    await acceptTask(deps, account, task.id, {});
+    expect(await acceptTask(deps, account, task.id, {})).toMatchObject({
+      ok: false,
+      status: 409,
+      error: "cannot accept a task that is queued",
+    });
+
+    const empty = await proposed(deps, account, { skill: "translate" });
+    expect(await acceptTask(deps, account, empty.id, {})).toMatchObject({
+      ok: false,
+      status: 422,
+    });
+  });
+
+  it("acts only on the requester's own tasks", async () => {
+    const { deps, account } = await setup();
+    const task = await proposed(deps, account);
+    const stranger = { ...account, id: "acct_2" };
+    for (const result of [
+      await acceptTask(deps, stranger, task.id, {}),
+      await researchTask(deps, stranger, task.id, {}),
+      await editTask(deps, stranger, task.id, { prompt: "x" }),
+      await withdrawTask(deps, stranger, task.id),
+      await withdrawTask(deps, account, "task_missing"),
+    ])
+      expect(result).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it("searches again, ruling workers out for good, and finds workers that joined since", async () => {
+    const { deps, account, h } = await setup();
+    const task = await proposed(deps, account, { skill: "translate" });
+    expect(task.candidates).toEqual([]);
+
+    // A translator joins later: searching again finds it (the task waited in the meantime).
+    const scribeListing = (await h.repos.agents.get(
+      "kavach-scribe",
+    )) as AgentListing;
+    await h.repos.agents.create({
+      ...scribeListing,
+      id: "translator",
+      evidenceSource: "translator",
+      skills: ["translate"],
+      builtIn: false,
+    });
+    const found = await researchTask(deps, account, task.id, {});
+    expect(found.ok && found.task.candidates.map((c) => c.workerId)).toEqual([
+      "translator",
+    ]);
+
+    const ruledOut = await researchTask(deps, account, task.id, {
+      exclude: ["translator"],
+    });
+    expect(ruledOut.ok && ruledOut.task).toMatchObject({
+      candidates: [],
+      excluded: ["translator"],
+    });
+    const again = await researchTask(deps, account, task.id, {});
+    expect(again.ok && again.task.candidates).toEqual([]);
+    expect(
+      await researchTask(deps, account, task.id, { exclude: "translator" }),
+    ).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("edits the prompt, target and maximum, then suggests again", async () => {
+    const { deps, account, h } = await setup();
+    await addWorker(h, "cheap-writer", 1_000_000n);
+    const task = await proposed(deps, account, { maxPriceTinybars: "5000000" });
+    expect(task.candidates.map((c) => c.workerId)).toEqual(["cheap-writer"]);
+
+    const edited = await editTask(deps, account, task.id, {
+      prompt: "Summarise this instead.",
+      maxPriceTinybars: "20000000",
+    });
+    if (!edited.ok) throw new Error(edited.error);
+    expect(edited.task).toMatchObject({
+      status: "awaiting-choice",
+      prompt: "Summarise this instead.",
+      maxPriceTinybars: 20_000_000n,
+    });
+    expect(edited.task.candidates.map((c) => c.workerId)).toEqual([
+      "cheap-writer",
+      "kavach-scribe",
+    ]);
+    expect(edited.task.events.at(-2)).toMatchObject({
+      type: "task.edited",
+      detail: "prompt, maxPriceTinybars",
+    });
+
+    const named = await editTask(deps, account, task.id, {
+      agentId: "kavach-scribe",
+    });
+    expect(named.ok && named.task).toMatchObject({
+      skill: null,
+      requestedAgentId: "kavach-scribe",
+    });
+    const back = await editTask(deps, account, task.id, { skill: "summarize" });
+    expect(back.ok && back.task).toMatchObject({
+      skill: "summarize",
+      requestedAgentId: null,
+    });
+
+    for (const bad of [
+      {},
+      { agentId: "a", skill: "summarize" },
+      { maxPriceTinybars: "0" },
+      null,
+    ])
+      expect(await editTask(deps, account, task.id, bad)).toMatchObject({
+        ok: false,
+        status: 400,
+      });
+  });
+
+  it("cannot edit, search again or withdraw once the worker is being paid or done", async () => {
+    const { deps, account } = await setup();
+    const r = await proposeTask(deps, account, SUMMARY_TASK);
+    if (!r.ok) throw new Error(r.error);
+    await runTask(deps, r.task.id);
+    for (const result of [
+      await editTask(deps, account, r.task.id, { prompt: "x" }),
+      await researchTask(deps, account, r.task.id, {}),
+      await withdrawTask(deps, account, r.task.id),
+    ])
+      expect(result).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it("withdraws a task before it runs, and a withdrawn task never runs", async () => {
+    const { deps, account, h } = await setup();
+    const choosing = await proposed(deps, account);
+    expect(await withdrawTask(deps, account, choosing.id)).toMatchObject({
+      ok: true,
+      task: { status: "withdrawn" },
+    });
+
+    const r = await proposeTask(deps, account, SUMMARY_TASK);
+    if (!r.ok) throw new Error(r.error);
+    await withdrawTask(deps, account, r.task.id);
+    expect(await runTask(deps, r.task.id)).toMatchObject({
+      status: "withdrawn",
+    });
+    expect(h.calls.pay).toHaveLength(0);
+    expect(await withdrawTask(deps, account, r.task.id)).toMatchObject({
+      ok: false,
+      status: 409,
+    });
+  });
+
+  it("withdrawing during a pending approval cancels it: approving later pays nothing", async () => {
+    const { deps, account, h } = await setup({
+      verdict: { level: "medium", reasons: ["new worker"] },
+    });
+    const r = await proposeTask(deps, account, SUMMARY_TASK);
+    if (!r.ok) throw new Error(r.error);
+    const waiting = await runTask(deps, r.task.id);
+    expect(waiting?.status).toBe("awaiting-approval");
+
+    const w = await withdrawTask(deps, account, r.task.id);
+    expect(w.ok && types(w.task).slice(-2)).toEqual([
+      "approval.cancelled",
+      "task.withdrawn",
+    ]);
+    expect((await h.repos.checks.get(waiting?.checkId as string))?.status).toBe(
+      "blocked",
+    );
+
+    // The human approves anyway, on the old link: nothing is paid.
+    const outcome = await completeApproval(
+      h.deps.approval,
+      h.issuer.approve(waiting?.approvalUrl as string),
+    );
+    const current = (await h.repos.tasks.get(r.task.id)) as never;
+    expect(await resumeTask(deps, current, outcome)).toBeNull();
+    const settled = await handleApprovalOutcome(h.deps, outcome);
+    expect(settled?.reason).toBe("NOT_AWAITING_APPROVAL");
+    expect(h.calls.pay).toHaveLength(0);
+  });
+
+  it("after a block, searches again without the worker that was tried", async () => {
+    const { deps, account, h } = await setup(
+      { verdict: { level: "medium", reasons: ["new worker"] } },
+      (listing) => ({
+        probe: {
+          async challenge() {
+            return { payTo: listing.payTo, amount: listing.priceTinybars };
+          },
+        },
+        payer: {
+          async pay() {
+            return {};
+          },
+        },
+      }),
+    );
+    await addWorker(h, "cheap-writer", 1_000_000n);
+    const task = await proposed(deps, account);
+    await acceptTask(deps, account, task.id, {});
+    const waiting = await runTask(deps, task.id);
+    expect(waiting?.workerId).toBe("cheap-writer");
+
+    const again = await researchTask(deps, account, task.id, {});
+    if (!again.ok) throw new Error(again.error);
+    expect(again.task).toMatchObject({
+      status: "awaiting-choice",
+      workerId: null,
+      checkId: null,
+      approvalUrl: null,
+      excluded: ["cheap-writer"],
+    });
+    expect(again.task.candidates.map((c) => c.workerId)).toEqual([
+      "kavach-scribe",
+    ]);
+    expect((await h.repos.checks.get(waiting?.checkId as string))?.status).toBe(
+      "blocked",
+    );
+    expect(types(again.task)).toContain("approval.cancelled");
+  });
+
+  it("lists what the requester may do next", () => {
+    expect(allowedActions("awaiting-choice")).toEqual([
+      "accept",
+      "research",
+      "edit",
+      "withdraw",
+    ]);
+    expect(allowedActions("awaiting-approval")).toEqual([
+      "research",
+      "edit",
+      "withdraw",
+    ]);
+    expect(allowedActions("queued")).toEqual(["withdraw"]);
+    for (const s of ["vetting", "running", "completed", "withdrawn"] as const)
+      expect(allowedActions(s)).toEqual([]);
   });
 });
 
@@ -356,7 +675,8 @@ describe("runTask", () => {
     expect(done?.checkId).toMatch(/^chk_/);
     expect(types(done)).toEqual([
       "task.created",
-      "worker.matched",
+      "workers.suggested",
+      "worker.accepted",
       "check.started",
       "worker.called",
       "answer.received",

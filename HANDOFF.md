@@ -41,7 +41,7 @@ Build plan, all done: 1 scaffold + TS core · 2 Rust core + WASM bridge · 3 con
 
 ### Verified (Nov 7, this machine)
 
-`pnpm check` is green: Biome, rustfmt, clippy (`-D warnings`, with `unwrap`/`expect`/`panic`/indexing denied), 80 Rust tests, WASM-is-up-to-date, 634 JS tests in 33 files (about 99% lines, 93.6% branches over the covered modules). `pnpm build` succeeds. `pnpm test:e2e` runs 17 Playwright tests on the production build (demo mode + simulated World). The Postgres adapter, the real migration and the whole repository contract pass against PGlite (a real Postgres engine). Verified live without credentials: World's real discovery document is accepted; our x402 route returned a correct HBAR challenge from the Blocky402 testnet facilitator.
+`pnpm check` is green: Biome, rustfmt, clippy (`-D warnings`, with `unwrap`/`expect`/`panic`/indexing denied), 80 Rust tests, WASM-is-up-to-date, 646 JS tests in 33 files (about 99% lines, 93.6% branches over the covered modules). `pnpm build` succeeds. `pnpm test:e2e` runs 17 Playwright tests on the production build (demo mode + simulated World). The Postgres adapter, the real migration and the whole repository contract pass against PGlite (a real Postgres engine). Verified live without credentials: World's real discovery document is accepted; our x402 route returned a correct HBAR challenge from the Blocky402 testnet facilitator.
 
 The differential tests were mutation-checked: deliberately breaking the TS hard-cap comparison (`>` → `>=`) and the TS auth-time skew direction both made the parity suite fail. Both were reverted.
 
@@ -182,6 +182,7 @@ Full walkthrough and safety table: [docs/TASKS.md](docs/TASKS.md).
 
 - **Registry:** new role `worker` with `model` and `skills` (migration `drizzle/0002_*.sql` adds them, plus tables `accounts` and `tasks`). `GET /api/agents?skill=` filters. Onboarding proves a worker with an unpaid `POST <endpoint>/chat/completions`. Built-in demo worker `kavach-scribe` at `/api/x402/workers/scribe/v1/chat/completions` (rules, not a model).
 - **Code:** `src/tasks/`: `accounts.ts` (tokens `kvk_…`, SHA-256 stored), `service.ts` (`proposeTask`, `runTask`, `resumeTask`), `worker.ts` (live and demo ports that replace the check's probe and payer), `answer.ts` (clean, cap, link-scan), `card.ts`. Routes: `POST /api/accounts`, `GET/POST /api/tasks`, `GET /api/tasks/[id]`, `/.well-known/agent-card.json`. The World callback resumes a task when the check belongs to one.
+- **Requester control:** `POST /api/tasks` returns suggestions (`awaiting-choice`) and pays nothing; the requester calls `accept`, `research`, `withdraw` (`POST /api/tasks/[id]/[action]`) or edits (`PATCH /api/tasks/[id]`). `autoAccept` keeps the unattended path. Withdraw/edit/research during a World ID approval closes that check so the old link cannot pay. Migration `0003` adds `skill`, `requested_agent_id`, `candidates`, `excluded` and makes `worker_id` nullable.
 - **Design choice:** a task payment *is* a Kavach402 check (`runCheck` with worker ports), so 0G reading, verifiers, policy, World ID and HCS audit apply unchanged.
 - **Not built:** per-account budgets, token revoke/expiry, approval routed to the account's own human, streaming, A2A message methods, a page. No task has paid a worker on Hedera.
 
