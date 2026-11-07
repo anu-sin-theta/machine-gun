@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { AcrRequirements, PolicyConfig } from "@/core";
 import { ACR, isHederaEntityId } from "@/core";
 import { parsePolicyConfig } from "@/rust";
+import { databaseUrlFrom } from "./database-url";
 
 const blankToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v;
@@ -63,7 +64,10 @@ const envSchema = z.object({
   // When set, /api/checks requires "Authorization: Bearer <token>" (it spends money and 0G credits).
   API_TOKEN: optional(z.string().min(16)),
 
+  // The connection string may also come in as STORAGE_URL or POSTGRES_URL (see database-url.ts).
   DATABASE_URL: optional(z.string().min(1)),
+  STORAGE_URL: optional(z.string().min(1)),
+  POSTGRES_URL: optional(z.string().min(1)),
 
   HEDERA_NETWORK: withDefault(z.enum(["testnet", "mainnet"]), "testnet"),
   HEDERA_AGENT_ACCOUNT_ID: optional(hederaId),
@@ -233,7 +237,7 @@ export function loadConfig(
     merchantOrigins: [
       ...new Set([new URL(env.APP_BASE_URL).origin, ...env.MERCHANT_ORIGINS]),
     ],
-    databaseUrl: env.DATABASE_URL,
+    databaseUrl: databaseUrlFrom(env),
     hedera: {
       network: env.HEDERA_NETWORK,
       agentAccountId: env.HEDERA_AGENT_ACCOUNT_ID,

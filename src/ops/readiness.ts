@@ -94,8 +94,8 @@ export async function checkReadiness(
         "Database",
         runtime.serverless ? "fail" : "warn",
         runtime.serverless
-          ? "no DATABASE_URL: the in-memory store is per instance, so approvals will break on serverless"
-          : "no DATABASE_URL: using the in-memory store (lost on restart)",
+          ? "no DATABASE_URL (or STORAGE_URL): the in-memory store is per instance, so approvals will break on serverless"
+          : "no DATABASE_URL (or STORAGE_URL): using the in-memory store (lost on restart)",
       ),
     );
   } else if (deps.repos) {

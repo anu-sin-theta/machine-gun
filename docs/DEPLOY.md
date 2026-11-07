@@ -11,7 +11,7 @@ Nothing here has been run on Vercel or Neon yet (no accounts were available whil
 
 ### Quick recipe: a public demo of the whole thing
 
-1. **Neon:** create a database, then from the repository root:
+1. **Neon:** create a database (or add Neon from the Vercel dashboard, Storage tab, which sets the variable for you), then from the repository root, using the pooled connection string:
    ```bash
    DATABASE_URL="postgres://..." pnpm db:migrate
    ```
@@ -72,7 +72,7 @@ A simulated World approves whoever is at the keyboard. A public demo deployment 
 | Variable | Demo | Live | Notes |
 |---|---|---|---|
 | `APP_BASE_URL` | yes | yes | The deployed URL |
-| `DATABASE_URL` | yes | yes | Neon |
+| `DATABASE_URL` | yes | yes | Neon, the **pooled** connection string (the host contains `-pooler`). `STORAGE_URL` and `POSTGRES_URL` are accepted too, in that order after `DATABASE_URL`: they are the names Vercel's Neon integration creates (prefix "STORAGE" gives `STORAGE_URL`), so a database added from the Vercel dashboard works without renaming anything |
 | `AGENT_MODE` | `demo` | unset | |
 | `WORLD_MODE` | `simulated` | unset | |
 | `WORLD_SIM_KEY` | yes | no | From `pnpm gen:sim-key`. Secret |

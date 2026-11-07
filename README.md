@@ -185,7 +185,7 @@ Leave `AGENT_MODE` unset, fill in the Hedera accounts, 0G key and (later) World 
    ```bash
    pnpm setup:hedera
    ```
-2. Only with `DATABASE_URL`:
+2. Only with `DATABASE_URL` (or `STORAGE_URL`):
    ```bash
    pnpm db:migrate
    ```

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Applies the SQL migrations in ./drizzle to the database in DATABASE_URL (Neon).
+// Applies the SQL migrations in ./drizzle to the database in DATABASE_URL, STORAGE_URL or POSTGRES_URL (Neon).
 //
 //   pnpm db:migrate        (reads DATABASE_URL from .env, or from the environment)
 //
@@ -11,9 +11,14 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { migrate } from "drizzle-orm/neon-http/migrator";
 
-const url = process.env.DATABASE_URL;
+// Same names and order as src/config/database-url.ts (a plain script cannot import TypeScript).
+const url = ["DATABASE_URL", "STORAGE_URL", "POSTGRES_URL"]
+  .map((name) => process.env[name]?.trim())
+  .find(Boolean);
 if (!url) {
-  console.error("DATABASE_URL is not set. Put it in .env or the environment.");
+  console.error(
+    "No database URL: set DATABASE_URL (or STORAGE_URL) in .env or the environment.",
+  );
   process.exit(1);
 }
 
