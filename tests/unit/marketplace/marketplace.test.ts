@@ -147,6 +147,25 @@ describe("validateEndpoint", () => {
     expect(isLocalOrigin("https://kavach.example")).toBe(false);
     expect(isLocalOrigin("not a url")).toBe(false);
   });
+
+  it("counts a private LAN address as a development machine, and nothing public", () => {
+    for (const lan of [
+      "http://10.54.1.141:3000",
+      "http://192.168.1.20:3000",
+      "http://172.16.0.5",
+      "http://172.31.255.1",
+    ])
+      expect(isLocalOrigin(lan)).toBe(true);
+    for (const pub of [
+      "http://8.8.8.8",
+      "http://172.15.0.1",
+      "http://172.32.0.1",
+      "http://11.0.0.1",
+      "https://10.example.com",
+      "http://100.64.0.1",
+    ])
+      expect(isLocalOrigin(pub)).toBe(false);
+  });
 });
 
 describe("cleanDetail and parseVerifierResponse", () => {

@@ -14,10 +14,15 @@ export const maxDuration = 60;
 
 /** World redirects the user's browser here after the step-up. */
 export async function GET(req: Request) {
-  const { baseUrl } = getConfig();
+  const { baseUrl, world } = getConfig();
+  // The token exchange must name the redirect URI the authorization used. The
+  // URL the server sees can differ (another host name, a proxy, a LAN address),
+  // so rebuild it from the configured one with the parameters World sent.
+  const callbackUrl = new URL(world.redirectUri);
+  callbackUrl.search = new URL(req.url).search;
   let outcome: Awaited<ReturnType<typeof completeApproval>>;
   try {
-    outcome = await completeApproval(getApprovalDeps(), new URL(req.url));
+    outcome = await completeApproval(getApprovalDeps(), callbackUrl);
   } catch (e) {
     if (e instanceof WorldError)
       return NextResponse.json({ error: e.kind }, { status: 503 });
