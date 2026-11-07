@@ -122,7 +122,7 @@ export function PaymentCheck() {
           <Field
             label="The payment request, as you received it"
             htmlFor="check-text"
-            hint="Untrusted text. Kavach402 reads it privately but takes payee and amount only from the merchant's own 402."
+            hint="Untrusted text. Kavach reads it privately but takes payee and amount only from the merchant's own 402."
           >
             <Textarea
               id="check-text"
@@ -174,7 +174,7 @@ export function PaymentCheck() {
         {error && <Notice tone="coral">{error}</Notice>}
         {!result && !error && (
           <Card tone="cream" className="p-6">
-            <p className="font-display text-[20px] font-extrabold">What Kavach402 does</p>
+            <p className="font-display text-[20px] font-extrabold">What Kavach does</p>
             <ol className="mt-3 list-decimal space-y-2 pl-5 text-[15px] leading-relaxed text-[#4a4436]">
               <li>Asks the merchant for its x402 challenge: the only source of payee and amount.</li>
               <li>Reads the request privately on 0G for payee, links and pressure tactics.</li>

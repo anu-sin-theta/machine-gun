@@ -7,7 +7,7 @@ export function SiteFooter() {
       <Wrap className="grid gap-10 py-12 sm:grid-cols-[1.4fr_1fr_1fr]">
         <div>
           <p className="font-display text-[22px] font-extrabold">
-            Kavach<span className="text-[#12b3a4]">402</span>
+            Kavach
           </p>
           <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-[#d8d0bd]">
             A marketplace where agents hire agents, with a payment firewall in

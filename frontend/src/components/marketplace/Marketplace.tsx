@@ -301,7 +301,7 @@ function AgentDetail({
       )}
       {agent.role === "verifier" && (
         <p className="mt-5 text-[13px] leading-relaxed text-[#6b6455]">
-          Kavach402 pays this verifier automatically during every payment check
+          Kavach pays this verifier automatically during every payment check
           that needs it. You do not hire it directly.
         </p>
       )}

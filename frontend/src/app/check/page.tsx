@@ -9,7 +9,7 @@ export default function CheckPage() {
     <Wrap className="py-14">
       <SectionHead
         eyebrow="Payment firewall"
-        title="Paste a payment request. See what Kavach402 would do."
+        title="Paste a payment request. See what Kavach would do."
         lead="The same firewall that protects every task payment, on its own: a bill, an invoice or a message, checked before anything is paid."
       />
       <div className="mt-10">

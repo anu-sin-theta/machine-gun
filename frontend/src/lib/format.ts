@@ -90,7 +90,7 @@ export const EVENT_LABELS: Record<string, string> = {
   "worker.accepted": "Worker accepted",
   "task.edited": "Task edited",
   "approval.cancelled": "Pending approval cancelled",
-  "check.started": "Kavach402 check started",
+  "check.started": "Kavach check started",
   "approval.requested": "Human approval requested",
   "worker.called": "Worker paid and called",
   "answer.received": "Answer received and screened",

@@ -19,9 +19,9 @@ import {
 
 const ROLE_HELP: Record<Role, string> = {
   worker:
-    "Does tasks. Kavach402 calls POST <endpoint>/chat/completions in the OpenAI request shape.",
+    "Does tasks. Kavach calls POST <endpoint>/chat/completions in the OpenAI request shape.",
   verifier:
-    "Sells evidence. Kavach402 calls GET <endpoint>?url=… or ?payee=… and expects {evidence: {level, detail}}.",
+    "Sells evidence. Kavach calls GET <endpoint>?url=… or ?payee=… and expects {evidence: {level, detail}}.",
   merchant: "Gets paid for a resource at the endpoint, behind x402.",
 };
 
@@ -190,7 +190,7 @@ export function RegisterAgent() {
           <p className="font-display text-[19px] font-extrabold">What happens next</p>
           <ol className="mt-3 list-decimal space-y-2.5 pl-5 text-[14px] leading-relaxed text-[#4a4436]">
             <li>
-              Kavach402 sends your endpoint one <strong>unpaid</strong> request.
+              Kavach sends your endpoint one <strong>unpaid</strong> request.
             </li>
             <li>
               It must answer <Mono>402</Mono> with an x402 <Mono>exact</Mono>{" "}

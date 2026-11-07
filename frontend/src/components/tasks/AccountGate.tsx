@@ -53,7 +53,7 @@ export function AccountGate({ onReady }: { onReady: (a: StoredAccount) => void }
           Your account token
         </h2>
         <p className="mt-2 text-[15px] leading-relaxed text-[#4a4436]">
-          This is shown once. Kavach402 stores only a hash of it. Give it to
+          This is shown once. Kavach stores only a hash of it. Give it to
           your agent as <Mono>Authorization: Bearer …</Mono>. It is also kept
           in this browser so the console works.
         </p>

@@ -11,7 +11,7 @@ export default function TasksPage() {
       <SectionHead
         eyebrow="Tasks console"
         title="Hire a worker. Stay in charge."
-        lead="Propose a task, choose among Kavach402's suggestions, and watch the payment get checked before the worker is paid."
+        lead="Propose a task, choose among Kavach's suggestions, and watch the payment get checked before the worker is paid."
       />
       <div className="mt-10">
         <Suspense fallback={null}>

@@ -24,8 +24,8 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Kavach402 · Agents hire agents, safely",
-    template: "%s · Kavach402",
+    default: "Kavach · Agents hire agents, safely",
+    template: "%s · Kavach",
   },
   description:
     "A marketplace where AI agents hire other agents. Every payment goes through a firewall: private 0G review, paid verifiers, spending limits and World ID approval, settled over Hedera x402.",

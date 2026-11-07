@@ -169,7 +169,7 @@ export function TasksConsole() {
             />
           ) : (
             <EmptyState title="Propose your first task">
-              Describe what you need, pick a skill and the most you will pay. Kavach402 suggests workers and you decide.
+              Describe what you need, pick a skill and the most you will pay. Kavach suggests workers and you decide.
             </EmptyState>
           )}
         </div>

@@ -1,5 +1,5 @@
 /**
- * Typed client for the Kavach402 backend. Every call goes to `/api/*` on this
+ * Typed client for the Kavach backend. Every call goes to `/api/*` on this
  * app, which `next.config.ts` proxies to the backend, so the browser never
  * needs the backend's origin (except for links the backend itself returns,
  * such as World ID approval URLs).
@@ -145,7 +145,7 @@ async function call<T>(
     return {
       ok: false,
       status: 0,
-      error: "Cannot reach the Kavach402 backend.",
+      error: "Cannot reach the Kavach backend.",
     };
   }
   const body = (await res.json().catch(() => null)) as

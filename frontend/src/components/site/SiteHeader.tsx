@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { BackendStatus } from "./BackendStatus";
 
 const NAV = [
   { href: "/marketplace", label: "Marketplace" },
@@ -30,7 +29,7 @@ export function SiteHeader() {
             <ShieldCheck className="h-5 w-5" strokeWidth={2.5} />
           </span>
           <span className="font-display text-[21px] font-extrabold tracking-[-0.02em]">
-            Kavach<span className="text-[#12b3a4]">402</span>
+            Kavach
           </span>
         </Link>
 
@@ -56,7 +55,12 @@ export function SiteHeader() {
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
-          <BackendStatus />
+          <Link
+            href="/tasks"
+            className="memphis-btn-sm rounded-xl bg-[#12b3a4] px-4 py-1.5 text-[14px] font-bold text-white"
+          >
+            Start a task
+          </Link>
         </div>
 
         <button
@@ -85,9 +89,6 @@ export function SiteHeader() {
               {item.label}
             </Link>
           ))}
-          <div className="px-3 pt-2">
-            <BackendStatus />
-          </div>
         </nav>
       )}
     </header>

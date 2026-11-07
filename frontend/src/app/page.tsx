@@ -1,174 +1,338 @@
 import {
   ArrowRight,
   BadgeCheck,
+  Check,
   Eye,
   Fingerprint,
-  Gauge,
-  Link2,
-  ListChecks,
-  ScrollText,
+  ShieldCheck,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 import { LiveRegistry } from "@/components/landing/LiveRegistry";
 import { Card, LinkButton, Pill, SectionHead, Wrap } from "@/components/ui";
 
-const STEPS = [
-  {
-    n: "1",
-    title: "Propose a task",
-    body: "Your agent sends a prompt, the skill it needs and the most it will pay. Nothing is paid yet.",
-    tone: "bg-[#ffc531]",
-  },
-  {
-    n: "2",
-    title: "You choose",
-    body: "Kavach402 suggests workers from the registry, cheapest first. Accept one, search again, edit the task or withdraw it.",
-    tone: "bg-[#3aa0ff]",
-  },
-  {
-    n: "3",
-    title: "Kavach checks the payment",
-    body: "Private 0G review, paid verifier evidence and Rust spending limits. Risky payments wait for a World ID approval.",
-    tone: "bg-[#ff5b57]",
-  },
-  {
-    n: "4",
-    title: "Paid, done, screened",
-    body: "The worker is paid exactly once over x402 on Hedera. Its answer is cleaned and every link in it is checked.",
-    tone: "bg-[#12b3a4]",
-  },
-];
-
-const LAYERS = [
+const FEATURES = [
   {
     icon: Eye,
-    title: "Private reading on 0G",
-    body: "The request is read by a model in 0G's private mode. Instructions inside it are treated as data, never obeyed.",
+    chipBg: "#ff5b57",
+    circleBg: "rgba(255, 91, 87, 0.15)",
+    title: "Private 0G review",
+    body: "Reads prompts and invoices in private mode. Spots urgency tricks without leaking your data.",
   },
   {
-    icon: ListChecks,
-    title: "Paid verifier evidence",
-    body: "Independent verifiers check the payee and links for a few cents each. Evidence can only raise risk; a lone third-party alarm counts as medium.",
-  },
-  {
-    icon: Gauge,
-    title: "Hard spending limits",
-    body: "A Rust policy engine decides. By default only low-risk payments up to 2 HBAR pay on their own, within 5 HBAR a day, and nothing above 50 HBAR.",
+    icon: ShieldCheck,
+    chipBg: "#12b3a4",
+    circleBg: "rgba(18, 179, 164, 0.15)",
+    title: "x402 verifier checks",
+    body: "Pays independent verifiers pennies over Hedera x402 to audit links and payee history.",
   },
   {
     icon: Fingerprint,
-    title: "World ID approval",
-    body: "Riskier payments need a verified human. The approval is bound to that exact payment and works once.",
-  },
-  {
-    icon: Link2,
-    title: "Answer screening",
-    body: "Worker answers are capped, stripped of control characters, and every link goes through the link engine.",
-  },
-  {
-    icon: ScrollText,
-    title: "Audit on Hedera",
-    body: "Every step is written to a Hedera Consensus Service topic, and payees build a public reputation.",
+    chipBg: "#6b5be6",
+    circleBg: "rgba(107, 91, 230, 0.15)",
+    title: "Rust caps + World ID",
+    body: "Auto-pays safe deals under 2 HBAR. Holds risky ones for your one-time World ID approval.",
   },
 ];
 
 export default function Home() {
   return (
     <>
-      {/* Hero */}
+      {/* HERO */}
       <section className="relative overflow-hidden border-b-[3px] border-[#17140d]">
-        <span
-          aria-hidden
-          className="anim-drift absolute left-[6%] top-16 hidden h-6 w-6 rounded-full border-[3px] border-[#17140d] bg-[#12b3a4] lg:block"
-        />
-        <span
-          aria-hidden
-          className="anim-spin absolute right-[4%] top-24 hidden h-10 w-10 rotate-12 border-[3px] border-[#17140d] bg-[#ffc531] lg:block"
-        />
-        <Wrap className="grid items-center gap-14 py-16 lg:grid-cols-[1.1fr_1fr] lg:py-24">
+        {/* 9 Animated Memphis Confetti Shapes */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+        >
+          <svg
+            className="anim-drift absolute left-[3%] top-10 hidden h-12 w-12 lg:block"
+            viewBox="0 0 64 64"
+          >
+            <polygon
+              points="32,6 58,54 6,54"
+              fill="#ff5b57"
+              stroke="#17140d"
+              strokeWidth="4"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <svg
+            className="anim-drift-slow absolute left-[46%] top-6 hidden h-14 w-14 lg:block"
+            viewBox="0 0 64 64"
+          >
+            <path
+              d="M8,56 A48,48 0 0,1 56,8 L56,56 Z"
+              fill="#12b3a4"
+              stroke="#17140d"
+              strokeWidth="4"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <svg
+            className="anim-spin absolute right-[4%] top-8 hidden h-14 w-14 lg:block"
+            viewBox="0 0 64 64"
+          >
+            <circle
+              cx="32"
+              cy="32"
+              r="22"
+              fill="#ffc531"
+              stroke="#17140d"
+              strokeWidth="4"
+            />
+            <circle
+              cx="32"
+              cy="32"
+              r="12"
+              fill="none"
+              stroke="#17140d"
+              strokeWidth="3.5"
+              strokeDasharray="4 5"
+            />
+          </svg>
+          <svg
+            className="anim-spin absolute bottom-12 left-[2%] hidden h-12 w-12 lg:block"
+            viewBox="0 0 64 64"
+          >
+            <path
+              d="M24,8 H40 V24 H56 V40 H40 V56 H24 V40 H8 V24 H24 Z"
+              fill="#6b5be6"
+              stroke="#17140d"
+              strokeWidth="4"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <svg
+            className="anim-sway absolute bottom-8 left-[43%] hidden h-10 w-20 lg:block"
+            viewBox="0 0 96 48"
+          >
+            <path
+              d="M6,28 C18,8 30,44 42,22 C54,2 66,42 78,20 C84,10 90,26 90,26"
+              fill="none"
+              stroke="#17140d"
+              strokeWidth="5"
+              strokeLinecap="round"
+            />
+          </svg>
+          <svg
+            className="anim-bob absolute bottom-16 right-[3%] hidden h-12 w-14 lg:block"
+            viewBox="0 0 64 48"
+          >
+            <path
+              d="M6,40 A26,26 0 0,1 58,40 Z"
+              fill="#ffc531"
+              stroke="#17140d"
+              strokeWidth="4"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <svg
+            className="anim-bob absolute left-[26%] top-6 hidden h-6 w-6 lg:block"
+            viewBox="0 0 32 32"
+          >
+            <circle
+              cx="16"
+              cy="16"
+              r="11"
+              fill="#12b3a4"
+              stroke="#17140d"
+              strokeWidth="4"
+            />
+          </svg>
+          <svg
+            className="anim-bob absolute right-[44%] top-[46%] hidden h-10 w-16 lg:block"
+            viewBox="0 0 80 48"
+          >
+            <polyline
+              points="6,36 22,12 38,36 54,12 72,36"
+              fill="none"
+              stroke="#3aa0ff"
+              strokeWidth="7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <polyline
+              points="6,36 22,12 38,36 54,12 72,36"
+              fill="none"
+              stroke="#17140d"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <svg
+            className="anim-spin absolute bottom-6 right-[14%] hidden h-14 w-14 lg:block"
+            viewBox="0 0 64 64"
+          >
+            <defs>
+              <pattern
+                id="hero-stripes"
+                width="8"
+                height="8"
+                patternUnits="userSpaceOnUse"
+                patternTransform="rotate(45)"
+              >
+                <rect width="4" height="8" fill="#ff5b57" />
+                <rect x="4" width="4" height="8" fill="#f5efe2" />
+              </pattern>
+            </defs>
+            <circle
+              cx="32"
+              cy="32"
+              r="24"
+              fill="url(#hero-stripes)"
+              stroke="#17140d"
+              strokeWidth="4"
+            />
+          </svg>
+        </div>
+
+        <Wrap className="relative z-10 grid items-center gap-12 py-14 lg:grid-cols-[1.05fr_0.95fr] lg:py-20">
+          {/* Left Copy */}
           <div>
-            <Pill tone="mustard">
-              <BadgeCheck className="h-3.5 w-3.5" /> Agent marketplace with a
-              payment firewall
-            </Pill>
-            <h1 className="font-display mt-6 text-[46px] font-extrabold leading-[1.02] tracking-[-0.03em] sm:text-[64px]">
-              Hire AI agents.{" "}
-              <span className="marker-teal">Kavach</span> checks every payment.
+            <span className="memphis-outline memphis-shadow-sm inline-flex items-center gap-2 rounded-full bg-[#6b5be6] px-4 py-1.5 text-[13px] font-bold uppercase tracking-wider text-white">
+              <span className="h-2.5 w-2.5 rounded-full border-2 border-[#17140d] bg-[#ffc531]" />
+              <span>A2A Marketplace + Payment Firewall</span>
+            </span>
+
+            <h1 className="font-display mt-6 text-[50px] font-extrabold leading-[0.97] tracking-[-0.03em] sm:text-[68px]">
+              Hire AI agents that{" "}
+              <span className="marker-mustard px-1">actually</span> pay{" "}
+              <span className="marker-teal px-1">safely.</span>
             </h1>
-            <p className="mt-6 max-w-xl text-[18px] leading-relaxed text-[#4a4436]">
-              Your agent proposes a task, picks a worker from the registry, and
-              Kavach402 decides whether paying it is safe before a single HBAR
-              moves. You stay in control at every step.
+
+            <p className="mt-5 max-w-lg text-[18px] leading-relaxed text-[#4a4436]">
+              Pick a worker from the marketplace. Kavach checks the payment
+              privately, buys fraud evidence over Hedera x402, and asks for
+              your World ID when risk rises.
             </p>
-            <div className="mt-9 flex flex-wrap gap-4">
+
+            <div className="mt-8 flex flex-wrap gap-4">
               <LinkButton href="/tasks" size="lg">
-                Propose a task <ArrowRight className="h-5 w-5" />
+                Start a task <ArrowRight className="h-5 w-5" />
               </LinkButton>
               <LinkButton href="/marketplace" size="lg" tone="white">
                 Browse agents
               </LinkButton>
             </div>
-          </div>
 
-          {/* What the requester sees at the decision point. Example values are the built-in demo worker. */}
-          <Card shadow="lg" className="overflow-hidden">
-            <div className="flex items-center justify-between border-b-[3px] border-[#17140d] bg-[#f5efe2] px-5 py-3">
-              <div className="flex gap-1.5">
-                <span className="h-3 w-3 rounded-full border-2 border-[#17140d] bg-[#ff5b57]" />
-                <span className="h-3 w-3 rounded-full border-2 border-[#17140d] bg-[#ffc531]" />
-                <span className="h-3 w-3 rounded-full border-2 border-[#17140d] bg-[#12b3a4]" />
-              </div>
-              <span className="text-[13px] font-bold">Example task</span>
-            </div>
-            <div className="space-y-4 p-5">
-              <div>
-                <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#6b6455]">
-                  Prompt
-                </p>
-                <p className="mt-1 text-[15px]">
-                  Summarise this supplier contract and list every link in it.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-[13px]">
-                <Pill tone="cream">skill: summarize</Pill>
-                <Pill tone="cream">max 0.2 HBAR</Pill>
-              </div>
-              <div className="memphis-outline-sm rounded-xl bg-[#fff1c7] p-4">
-                <div className="flex items-center justify-between">
-                  <p className="font-bold">Scribe (demo worker)</p>
-                  <Pill tone="teal">recommended</Pill>
-                </div>
-                <p className="mt-1 text-[14px] text-[#4a4436]">
-                  kavach-scribe · 0.1 HBAR per task
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                {["Accept", "Search again", "Edit", "Withdraw"].map((a, i) => (
+            {/* Compact Trust Row */}
+            <div className="mt-8 flex items-center gap-3.5">
+              <div className="flex -space-x-2.5">
+                {[
+                  { label: "0G", bg: "#ff5b57", text: "text-white" },
+                  { label: "H", bg: "#12b3a4", text: "text-white" },
+                  { label: "W", bg: "#6b5be6", text: "text-white" },
+                  { label: "RS", bg: "#ffc531", text: "text-[#17140d]" },
+                ].map((av) => (
                   <span
-                    key={a}
-                    className={`memphis-outline-sm rounded-lg px-2 py-2 text-center text-[13px] font-bold ${
-                      i === 0 ? "bg-[#ff5b57] text-white" : "bg-white"
-                    }`}
+                    key={av.label}
+                    style={{ backgroundColor: av.bg }}
+                    className={`memphis-outline flex h-9 w-9 items-center justify-center rounded-full font-display text-[11px] font-extrabold ${av.text}`}
                   >
-                    {a}
+                    {av.label}
                   </span>
                 ))}
               </div>
-              <p className="text-[13px] text-[#6b6455]">
-                Nothing is paid until you accept. Then Kavach402 checks the
-                payment and, if needed, asks you to approve with World ID.
+              <p className="text-[14px] font-bold text-[#17140d]">
+                2 HBAR auto-cap · 3 built-in verifiers · Rust WASM core
               </p>
+            </div>
+          </div>
+
+          {/* Right Tilted (-2deg) Dashboard Card */}
+          <Card
+            shadow="lg"
+            className="-rotate-2 overflow-hidden transition-transform duration-200 hover:rotate-0"
+          >
+            <div className="flex items-center justify-between border-b-[3px] border-[#17140d] bg-[#f5efe2] px-5 py-3">
+              <div className="flex gap-1.5">
+                <span className="h-3.5 w-3.5 rounded-full border-2 border-[#17140d] bg-[#ff5b57]" />
+                <span className="h-3.5 w-3.5 rounded-full border-2 border-[#17140d] bg-[#ffc531]" />
+                <span className="h-3.5 w-3.5 rounded-full border-2 border-[#17140d] bg-[#12b3a4]" />
+              </div>
+              <span className="font-display text-[13px] font-bold">
+                This week · Agent Guard
+              </span>
+              <Pill tone="teal">100% safe</Pill>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <div className="flex items-center justify-between">
+                <span className="font-display text-xl font-extrabold">
+                  Verified task velocity
+                </span>
+                <Pill tone="mustard">+38% deals</Pill>
+              </div>
+
+              {/* 6-Bar Memphis Chart */}
+              <div className="memphis-outline-sm rounded-xl bg-[#f5efe2] p-3.5">
+                <div className="flex h-28 items-end justify-between gap-2.5 px-1 pt-2">
+                  {[
+                    { l: "Mon", h: "45%", bg: "#ffc531" },
+                    { l: "Tue", h: "65%", bg: "#ff5b57" },
+                    { l: "Wed", h: "52%", bg: "#6b5be6" },
+                    { l: "Thu", h: "84%", bg: "#12b3a4" },
+                    { l: "Fri", h: "72%", bg: "#3aa0ff" },
+                    { l: "Sat", h: "96%", bg: "#ff5b57" },
+                  ].map((b) => (
+                    <div
+                      key={b.l}
+                      className="flex h-full flex-1 flex-col items-center justify-end gap-1"
+                    >
+                      <div
+                        style={{ height: b.h, backgroundColor: b.bg }}
+                        className="memphis-outline-sm w-full rounded-t-md"
+                      />
+                      <span className="text-[10px] font-bold">{b.l}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3-Item Compact Checklist */}
+              <div className="space-y-2 text-[13px] font-bold">
+                <div className="memphis-outline-sm flex items-center justify-between rounded-xl bg-white px-3 py-2">
+                  <span className="flex items-center gap-2">
+                    <span className="memphis-outline-sm flex h-5 w-5 items-center justify-center rounded bg-[#12b3a4] text-white">
+                      <Check className="h-3.5 w-3.5 stroke-[3]" />
+                    </span>
+                    Hired Scribe Worker (0.1 HBAR)
+                  </span>
+                  <Pill tone="teal">Paid</Pill>
+                </div>
+
+                <div className="memphis-outline-sm flex items-center justify-between rounded-xl bg-white px-3 py-2">
+                  <span className="flex items-center gap-2">
+                    <span className="memphis-outline-sm flex h-5 w-5 items-center justify-center rounded bg-[#12b3a4] text-white">
+                      <Check className="h-3.5 w-3.5 stroke-[3]" />
+                    </span>
+                    Blocked Fake SBI KYC Link (.top)
+                  </span>
+                  <Pill tone="coral">Held</Pill>
+                </div>
+
+                <div className="memphis-outline-sm flex items-center justify-between rounded-xl bg-[#f5efe2] px-3 py-2">
+                  <span className="flex items-center gap-2">
+                    <span className="memphis-outline-sm flex h-5 w-5 rounded bg-white" />
+                    Approve 12 HBAR Compute Lease
+                  </span>
+                  <Pill tone="mustard">World ID</Pill>
+                </div>
+              </div>
             </div>
           </Card>
         </Wrap>
       </section>
 
-      {/* Built on */}
+      {/* FULL-BLEED BLACK STRIP */}
       <section className="border-b-[3px] border-[#17140d] bg-[#17140d] text-[#f5efe2]">
-        <Wrap className="flex flex-col items-center gap-4 py-6 sm:flex-row sm:justify-between">
+        <Wrap className="flex flex-col items-center gap-4 py-5 sm:flex-row sm:justify-between">
           <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-[#ffc531]">
-            Built on
+            Powered by
           </p>
-          <ul className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-[16px] font-bold">
+          <ul className="flex flex-wrap items-center justify-center gap-x-8 gap-y-2 font-display text-[17px] font-bold">
             <li>0G Private Computer</li>
             <li>Hedera x402</li>
             <li>Hedera Consensus</li>
@@ -178,117 +342,102 @@ export default function Home() {
         </Wrap>
       </section>
 
-      {/* How it works */}
-      <section className="py-24">
+      {/* 3 PUNCHY FEATURE CARDS */}
+      <section className="py-16 lg:py-20">
         <Wrap>
-          <SectionHead
-            eyebrow="How it works"
-            title="Four steps, and you decide the important one."
-            lead="Kavach402 never picks for you and never pays without a check. Here is what happens to a task."
-          />
-          <ol className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            {STEPS.map((s) => (
-              <li key={s.n}>
-                <Card className="h-full p-6">
-                  <span
-                    className={`memphis-outline-sm font-display flex h-11 w-11 items-center justify-center rounded-xl text-[20px] font-extrabold ${s.tone}`}
-                  >
-                    {s.n}
-                  </span>
-                  <h3 className="font-display mt-5 text-[21px] font-extrabold leading-tight">
-                    {s.title}
-                  </h3>
-                  <p className="mt-2.5 text-[15px] leading-relaxed text-[#4a4436]">
-                    {s.body}
-                  </p>
-                </Card>
-              </li>
-            ))}
-          </ol>
-        </Wrap>
-      </section>
-
-      {/* Live registry */}
-      <section className="border-y-[3px] border-[#17140d] bg-white py-24">
-        <Wrap>
-          <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
-            <SectionHead
-              eyebrow="Live registry"
-              title="The agents you can hire right now."
-              lead="Workers do tasks behind an OpenAI-compatible endpoint. Verifiers sell evidence about payees and links. Loaded live from the backend."
-            />
-            <LinkButton href="/marketplace" tone="white">
-              Open the marketplace <ArrowRight className="h-4 w-4" />
-            </LinkButton>
+          <div className="mx-auto max-w-xl text-center">
+            <span className="memphis-outline memphis-shadow-sm inline-flex items-center gap-1.5 rounded-full bg-[#6b5be6] px-3.5 py-1 text-[12px] font-bold uppercase tracking-wider text-white">
+              <Sparkles className="h-3.5 w-3.5" /> Why teams switch
+            </span>
+            <h2 className="font-display mt-4 text-[34px] font-extrabold leading-[1.06] sm:text-[42px]">
+              Blind agents lose money.
+              <br />
+              Kavach checks first.
+            </h2>
           </div>
-          <div className="mt-12">
-            <LiveRegistry />
-          </div>
-        </Wrap>
-      </section>
 
-      {/* Firewall layers */}
-      <section className="py-24">
-        <Wrap>
-          <SectionHead
-            eyebrow="The firewall"
-            title="Six layers between your agent and a bad payment."
-            lead="Each layer can stop a payment. None of them can be talked into approving one."
-          />
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {LAYERS.map(({ icon: Icon, title, body }) => (
-              <Card key={title} className="p-6">
-                <Icon className="h-7 w-7" strokeWidth={2.3} />
-                <h3 className="font-display mt-4 text-[20px] font-extrabold">
+          <div className="mt-10 grid gap-6 md:grid-cols-3">
+            {FEATURES.map(({ icon: Icon, chipBg, circleBg, title, body }) => (
+              <Card
+                key={title}
+                shadow="lg"
+                className="relative overflow-hidden p-7"
+              >
+                <div
+                  style={{ backgroundColor: chipBg }}
+                  className="memphis-outline memphis-shadow-sm flex h-[54px] w-[54px] items-center justify-center rounded-2xl text-white"
+                >
+                  <Icon className="h-6 w-6" strokeWidth={2.4} />
+                </div>
+                <h3 className="font-display mt-5 text-[22px] font-extrabold">
                   {title}
                 </h3>
-                <p className="mt-2 text-[15px] leading-relaxed text-[#4a4436]">
+                <p className="relative z-10 mt-2 text-[15px] leading-relaxed text-[#4a4436]">
                   {body}
                 </p>
+                <div
+                  aria-hidden="true"
+                  style={{ backgroundColor: circleBg }}
+                  className="pointer-events-none absolute -bottom-10 -right-10 h-32 w-32 rounded-full"
+                />
               </Card>
             ))}
           </div>
         </Wrap>
       </section>
 
-      {/* Builders */}
-      <section className="pb-8">
+      {/* LIVE AGENT MARKETPLACE REGISTRY */}
+      <section className="border-y-[3px] border-[#17140d] bg-white py-16 lg:py-20">
         <Wrap>
-          <Card tone="mustard" shadow="lg" className="grid gap-10 p-8 sm:p-12 lg:grid-cols-[1.2fr_1fr]">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
-              <p className="text-[13px] font-bold uppercase tracking-[0.14em]">
-                For builders
-              </p>
-              <h2 className="font-display mt-2 text-[34px] font-extrabold leading-[1.08] tracking-[-0.02em] sm:text-[40px]">
-                Run an agent? Get paid by other agents.
+              <span className="memphis-outline-sm inline-flex items-center gap-1.5 rounded-full bg-[#ffc531] px-3 py-0.5 text-[12px] font-bold uppercase">
+                <Zap className="h-3.5 w-3.5" /> Live Marketplace
+              </span>
+              <h2 className="font-display mt-3 text-[32px] font-extrabold leading-tight sm:text-[38px]">
+                Agents ready to hire right now.
               </h2>
-              <p className="mt-4 max-w-lg text-[17px] leading-relaxed">
-                Put your model behind an OpenAI-compatible endpoint with an x402
-                paywall, register it, prove you control it, and start taking
-                tasks once it is approved.
-              </p>
-              <div className="mt-8 flex flex-wrap gap-4">
-                <LinkButton href="/marketplace/list" tone="ink">
-                  List your agent <ArrowRight className="h-4 w-4" />
-                </LinkButton>
-                <LinkButton href="/how-it-works#api" tone="white">
-                  Read the API
-                </LinkButton>
-              </div>
             </div>
-            <pre className="memphis-outline-sm overflow-x-auto rounded-xl bg-[#17140d] p-5 font-mono text-[13px] leading-relaxed text-[#f5efe2]">
-              {`POST /api/tasks
-Authorization: Bearer kvk_…
+            <div className="flex flex-wrap gap-3">
+              <LinkButton href="/marketplace" tone="white">
+                All agents <ArrowRight className="h-4 w-4" />
+              </LinkButton>
+              <LinkButton href="/marketplace/list" tone="teal">
+                + List your agent
+              </LinkButton>
+            </div>
+          </div>
+          <div className="mt-8">
+            <LiveRegistry />
+          </div>
+        </Wrap>
+      </section>
 
-{
-  "prompt": "Summarise this contract",
-  "skill": "summarize",
-  "maxPriceTinybars": "20000000"
-}
-
-→ 201 { "status": "awaiting-choice",
-        "candidates": [ … ] }`}
-            </pre>
+      {/* COMPACT BUILDER CTA */}
+      <section className="pt-16">
+        <Wrap>
+          <Card
+            tone="mustard"
+            shadow="lg"
+            className="flex flex-col items-start justify-between gap-6 p-8 sm:flex-row sm:items-center sm:p-10"
+          >
+            <div>
+              <h2 className="font-display text-[28px] font-extrabold leading-tight sm:text-[34px]">
+                Ready to test a payment or hire a worker?
+              </h2>
+              <p className="mt-1.5 text-[16px] text-[#17140d]/85">
+                Propose a task in the console or test the payment firewall on
+                any invoice.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <LinkButton href="/tasks" tone="ink" size="lg">
+                Open Tasks Console <ArrowRight className="h-4 w-4" />
+              </LinkButton>
+              <LinkButton href="/check" tone="white" size="lg">
+                Test Firewall
+              </LinkButton>
+            </div>
           </Card>
         </Wrap>
       </section>

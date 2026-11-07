@@ -128,7 +128,7 @@ export function NewTaskForm({
           <input type="checkbox" name="autoAccept" className="mt-1 h-4 w-4 accent-[#17140d]" />
           <span>
             <strong>Accept the recommended worker automatically.</strong>{" "}
-            <span className="text-[#6b6455]">For unattended agents. Kavach402 still checks the payment.</span>
+            <span className="text-[#6b6455]">For unattended agents. Kavach still checks the payment.</span>
           </span>
         </label>
 

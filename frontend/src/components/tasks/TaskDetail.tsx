@@ -37,7 +37,7 @@ export function TaskDetail({
   const [editing, setEditing] = useState(false);
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
 
-  // A new set of suggestions resets the selection to Kavach402's pick.
+  // A new set of suggestions resets the selection to Kavach's pick.
   const [seenCandidates, setSeenCandidates] = useState(task.candidates);
   if (seenCandidates !== task.candidates) {
     setSeenCandidates(task.candidates);
@@ -85,7 +85,7 @@ export function TaskDetail({
         <Card shadow="lg" className="p-6">
           <h3 className="font-display text-[22px] font-extrabold">Choose a worker</h3>
           <p className="mt-1 text-[15px] text-[#4a4436]">
-            Kavach402 suggests these, cheapest first. Nothing is paid until you accept.
+            Kavach suggests these, cheapest first. Nothing is paid until you accept.
           </p>
           {task.candidates.length === 0 ? (
             <div className="mt-5">
@@ -189,7 +189,7 @@ export function TaskDetail({
             <div>
               <h3 className="font-display text-[22px] font-extrabold">A human needs to approve this payment</h3>
               <p className="mt-1 text-[15px] leading-relaxed">
-                Kavach402&apos;s policy wants a World ID approval before paying{" "}
+                Kavach&apos;s policy wants a World ID approval before paying{" "}
                 <Mono className="font-bold">{task.workerId}</Mono>. The approval is bound to this exact payment.
                 This page updates when it is done.
               </p>
@@ -245,7 +245,7 @@ export function TaskDetail({
             )}
             <div>
               <h3 className="font-display text-[22px] font-extrabold">
-                {task.status === "blocked" ? "Kavach402 did not pay" : "The run did not finish"}
+                {task.status === "blocked" ? "Kavach did not pay" : "The run did not finish"}
               </h3>
               <p className="mt-1 text-[15px] text-[#4a4436]">
                 {lastDetail ? explainReason(lastDetail) : "No reason was recorded."} You can search for another worker
@@ -316,7 +316,7 @@ export function TaskDetail({
 function Progress({ status }: { status: "queued" | "vetting" | "running" }) {
   const steps = [
     { id: "queued", label: "Accepted" },
-    { id: "vetting", label: "Kavach402 checks the payment" },
+    { id: "vetting", label: "Kavach checks the payment" },
     { id: "running", label: "Worker paid and working" },
   ] as const;
   const at = steps.findIndex((s) => s.id === status);
@@ -379,7 +379,7 @@ function EditForm({
     <Card shadow="lg" className="p-6">
       <h3 className="font-display text-[22px] font-extrabold">Edit the task</h3>
       <p className="mt-1 text-[14px] text-[#4a4436]">
-        Kavach402 suggests workers again afterwards.
+        Kavach suggests workers again afterwards.
         {task.status === "awaiting-approval" && " The pending approval is cancelled so it can never pay."}
       </p>
       <form onSubmit={submit} className="mt-5 space-y-4">

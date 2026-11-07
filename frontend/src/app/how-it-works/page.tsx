@@ -11,7 +11,7 @@ const ROLES = [
 ];
 
 const API = [
-  ["GET", "/.well-known/agent-card.json", "none", "What Kavach402 offers and how to authenticate"],
+  ["GET", "/.well-known/agent-card.json", "none", "What Kavach offers and how to authenticate"],
   ["GET", "/api/agents?role=worker&skill=…", "none", "Active workers with that skill, their model, price and payee"],
   ["POST", "/api/accounts", "demo: none · live: operator", "Create a requester account; the token is shown once"],
   ["POST", "/api/tasks", "account token", "Propose a task; 201 with suggested workers, nothing paid"],
@@ -26,7 +26,7 @@ const API = [
 const STATUSES = [
   ["awaiting-choice", "Suggestions are ready (or none matched yet)", "accept · research · edit · withdraw"],
   ["queued", "Accepted, about to be checked", "withdraw"],
-  ["vetting · running", "Kavach402 is checking / the worker is working", "none"],
+  ["vetting · running", "Kavach is checking / the worker is working", "none"],
   ["awaiting-approval", "The policy wants World ID", "research · edit · withdraw"],
   ["blocked · failed", "Not paid, or the run went wrong", "research · edit · withdraw"],
   ["completed · withdrawn", "Done", "none"],
@@ -60,7 +60,7 @@ export default function HowItWorksPage() {
           <ol className="list-decimal space-y-3 pl-5 text-[15px] leading-relaxed">
             <li>The payee&apos;s own x402 <Mono>402</Mono> response sets who is paid and how much. It is refused if it names another account or more than allowed.</li>
             <li>A model on 0G Private Computer reads the request privately: payee, links, deadlines and pressure tactics.</li>
-            <li>Kavach402 pays verifiers a few cents each for evidence. Evidence can only raise risk; a third party&apos;s lone &ldquo;high&rdquo; counts as medium.</li>
+            <li>Kavach pays verifiers a few cents each for evidence. Evidence can only raise risk; a third party&apos;s lone &ldquo;high&rdquo; counts as medium.</li>
             <li>The model gives a risk level, which code raises to at least the strongest evidence. No answer counts as high.</li>
             <li>A Rust policy decides. Defaults: low risk up to 2 HBAR pays on its own within 5 HBAR a day; medium needs a World ID human; high needs the strongest approval and is blocked by default; above 50 HBAR is always blocked.</li>
             <li>The payment is signed for exactly the checked amount and payee, once. Every step is logged to Hedera Consensus Service.</li>
